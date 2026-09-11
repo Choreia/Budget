@@ -263,6 +263,10 @@
   .step p{font-size:.82rem; color:var(--sub); margin:0 0 12px}
   .step .hint{margin-top:6px}
   .step .actions{margin-top:14px}
+  .adminlist{display:grid; gap:6px}
+  .adminrow{display:flex; align-items:center; gap:10px; background:var(--panel2);
+    border:1px solid var(--line); border-radius:9px; padding:8px 13px; font-size:.85rem}
+  .adminrow .mono{flex:1; min-width:0; overflow-wrap:anywhere}
   .opt-tag{font-size:.7rem; font-weight:700; color:var(--muted); background:var(--card);
     border:1px solid var(--line2); border-radius:999px; padding:1px 8px; margin-left:8px; vertical-align:middle}
   code.k{font-family:"IBM Plex Mono",monospace; font-size:.82em; background:var(--panel2);
@@ -517,14 +521,18 @@
       <!-- 設定 -->
       <section id="settings" hidden>
         <h2 class="scr">設定</h2>
-        <p class="lede">いまつないでいる場所と、人のロール。ロールを変えられるのは経理だけです。</p>
+        <p class="lede">管理者と、人のロール。管理者に登録した人は経理ロールになります。設定は会社の設定ファイルに入るので、一度決めれば全員に効きます。</p>
         <div class="card" style="margin-bottom:20px">
-          <h3>つないでいる先</h3>
-          <div class="body" id="conn-box"></div>
+          <h3>管理者</h3>
+          <div class="body" id="admin-box"></div>
         </div>
-        <div class="card">
+        <div class="card" style="margin-bottom:20px">
           <h3>人とロール</h3>
           <div class="body" id="users-box"></div>
+        </div>
+        <div class="card">
+          <h3>つないでいる先</h3>
+          <div class="body" id="conn-box"></div>
         </div>
       </section>
     </main>
@@ -630,10 +638,100 @@ async function start(silent){
   }
   $('gate').hidden = true;
   $('btn-signout').hidden = false;
+  me.domain = (me.email.split('@')[1] || '').toLowerCase();
+
+  // ほかの Choreia と同じで、会社の設定ファイルを探して自動でつなぐ
+  busy('設定を探しています…');
+  try{ await findConfig(); }catch(e){}
+  busy(false);
+  if(orgConfig && orgConfig.spreadsheetId){
+    ssId = orgConfig.spreadsheetId;
+    driveRoot = orgConfig.folderId || null;
+    await boot();
+    return;
+  }
   ssId = localStorage.getItem('cb_ss_id');
   driveRoot = localStorage.getItem('cb_drive_id') || null;
   if(!ssId){ $('setup').hidden = false; return; }
   await boot();
+}
+
+/* ==================== 会社の設定ファイル ==================== */
+/* ほかの Choreia アプリと同じ作法。Drive に choreia-budget-config.json を1つ置き、
+   全員がそれを見つけてつなぐ。管理者はここにメールで登録する。 */
+var CONFIG_FILENAME = 'choreia-budget-config.json';
+var CONFIG_CACHE = 'cb_config_cache';
+var orgConfig = null;
+
+function cacheConfig(){
+  try{ localStorage.setItem(CONFIG_CACHE, JSON.stringify(orgConfig)); }catch(e){}
+}
+async function findConfig(){
+  try{
+    var c = JSON.parse(localStorage.getItem(CONFIG_CACHE) || 'null');
+    if(c && c.spreadsheetId && c.domain === me.domain){ orgConfig = c; return c; }
+  }catch(e){}
+  var q = encodeURIComponent("name='"+CONFIG_FILENAME+"' and trashed=false");
+  var d = await api('https://www.googleapis.com/drive/v3/files?q='+q+
+    '&corpora=allDrives&includeItemsFromAllDrives=true&supportsAllDrives=true&fields=files(id,name)');
+  var files = d.files || [];
+  for(var i=0;i<files.length;i++){
+    try{
+      var r = await api('https://www.googleapis.com/drive/v3/files/'+files[i].id+'?alt=media&supportsAllDrives=true');
+      if(r && r.spreadsheetId && (!r.domain || r.domain === me.domain)){
+        r.configFileId = files[i].id;
+        orgConfig = r; cacheConfig(); return r;
+      }
+    }catch(e){}
+  }
+  return null;
+}
+async function saveConfig(){
+  var body = JSON.stringify(orgConfig, null, 2);
+  if(orgConfig.configFileId){
+    var res = await fetch('https://www.googleapis.com/upload/drive/v3/files/'+orgConfig.configFileId+
+      '?uploadType=media&supportsAllDrives=true',
+      {method:'PATCH', headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'application/json'}, body:body});
+    if(!res.ok) throw new Error('設定を保存できませんでした');
+  } else {
+    var meta = {name:CONFIG_FILENAME, mimeType:'application/json'};
+    if(driveRoot) meta.parents = [driveRoot];
+    var b = '-------cb'+Date.now();
+    var payload = '--'+b+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(meta)+
+      '\r\n--'+b+'\r\nContent-Type: application/json\r\n\r\n'+body+'\r\n--'+b+'--';
+    var r2 = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id',
+      {method:'POST', headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'multipart/related; boundary='+b}, body:payload});
+    if(!r2.ok) throw new Error('設定を保存できませんでした');
+    var f = await r2.json();
+    orgConfig.configFileId = f.id;
+    try{ await shareInDomain(f.id); }catch(e){}
+  }
+  cacheConfig();
+}
+/* はじめの設定でフォルダ欄が埋まっていたら使う */
+async function useDriveField(){
+  var el = $('drive-id');
+  if(el && el.value.trim()){
+    driveRoot = idFromUrl(el.value);
+    localStorage.setItem('cb_drive_id', driveRoot);
+  } else if(!driveRoot){
+    await ensureDriveRoot();
+  }
+}
+/* 設定した人が最初の管理者。以後はこのファイルを見て全員が自動でつながる。 */
+async function writeFirstConfig(){
+  if(orgConfig && orgConfig.spreadsheetId) return;
+  orgConfig = {
+    domain: me.domain, admin: me.email, admins: [me.email], adminName: me.name,
+    spreadsheetId: ssId, folderId: driveRoot || '', createdAt: new Date().toISOString()
+  };
+  try{ await saveConfig(); }
+  catch(e){ toast('設定ファイルを置けませんでした。あなたの端末でだけ動きます。', true); }
+}
+function isAdmin(email){
+  if(!orgConfig) return false;
+  var list = orgConfig.admins || (orgConfig.admin ? [orgConfig.admin] : []);
+  return list.map(function(x){ return String(x).toLowerCase(); }).indexOf(String(email||'').toLowerCase()) >= 0;
 }
 function signOut(){
   if(accessToken && window.google) google.accounts.oauth2.revoke(accessToken, function(){});
@@ -768,6 +866,8 @@ async function ensureMe(){
   me.role = row['ロール'] || 'user';
   me.dept = row['部門'] || '';
   me.manager = row['上長メール'] || '';
+  // 設定ファイルの管理者は、シートの内容にかかわらず経理ロール
+  if(isAdmin(me.email)) me.role = 'acc';
 }
 async function ensureDriveRoot(){
   if(driveRoot) return;
@@ -1577,8 +1677,63 @@ function renderMaster(){
 
 /* ==================== 設定 ==================== */
 var ROLE_NAME = {user:'一般ユーザ', mgr:'課長', acc:'経理', pres:'社長'};
+function renderAdmins(){
+  var list = (orgConfig && (orgConfig.admins || (orgConfig.admin ? [orgConfig.admin] : []))) || [];
+  var owner = orgConfig && (orgConfig.admin || list[0]);
+  var can = isAdmin(me.email);
+  $('admin-box').innerHTML =
+    '<p style="margin:0 0 12px;color:var(--sub);font-size:.85rem">'+
+    '管理者は経理ロールになります。まだログインしたことがない人も、メールで先に登録できます。'+
+    'この一覧は会社の設定ファイル（Googleドライブの choreia-budget-config.json）に入ります。</p>'+
+    '<div class="adminlist">'+ (list.length ? list.map(function(a){
+      return '<div class="adminrow"><span class="mono">'+esc(a)+'</span>'+
+        (String(a).toLowerCase()===String(owner).toLowerCase()
+          ? '<span class="pill p-info">オーナー</span>'
+          : (can ? '<button class="btn ghost sm" data-deladmin="'+esc(a)+'">外す</button>' : ''))+'</div>';
+    }).join('') : '<div class="empty">管理者がいません。</div>') +'</div>'+
+    (can ? '<div class="toolbar" style="margin:14px 0 0">'+
+      '<input type="text" id="admin-new" placeholder="メールアドレス">'+
+      '<button class="btn sm" id="btn-admin-add">管理者にする</button></div>'
+     : '<p class="hint" style="margin-top:10px">管理者を増やせるのは管理者だけです。</p>');
+  var b = $('btn-admin-add');
+  if(b) b.onclick = async function(){
+    var v = $('admin-new').value.trim().toLowerCase();
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)){ toast('メールアドレスを入れてください', true); return; }
+    var cur = orgConfig.admins || [orgConfig.admin];
+    if(cur.map(function(x){ return String(x).toLowerCase(); }).indexOf(v) >= 0){ toast('すでに管理者です'); return; }
+    cur.push(v); orgConfig.admins = cur;
+    this.disabled = true;
+    try{
+      await saveConfig();
+      await logAudit('管理者を追加', v, '', '');
+      toast(v + ' を管理者にしました');
+      renderAdmins();
+    }catch(e){ toast('保存できませんでした：'+e.message, true); }
+    this.disabled = false;
+  };
+}
+async function removeAdmin(email){
+  if(!confirm(email + ' を管理者から外しますか。')) return;
+  orgConfig.admins = (orgConfig.admins||[]).filter(function(a){ return String(a).toLowerCase() !== String(email).toLowerCase(); });
+  await saveConfig();
+  await logAudit('管理者を外した', email, '', '');
+  toast('外しました');
+  renderAdmins();
+}
+async function addPerson(){
+  var v = $('person-new').value.trim().toLowerCase();
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)){ toast('メールアドレスを入れてください', true); return; }
+  if(DB['人'].some(function(u){ return (u['メール']||'').toLowerCase()===v; })){ toast('もう入っています'); return; }
+  var row = {'メール':v, '名前':v.split('@')[0], 'ロール':$('person-role').value, '部門':$('person-dept').value.trim(), '上長メール':''};
+  await appendRow('人', row);
+  await logAudit('人を追加', v, '', row['ロール']);
+  $('person-new').value=''; $('person-dept').value='';
+  toast(v + ' を足しました');
+  await loadAll(); renderAll();
+}
 function renderSettings(){
-  var hasAcc = DB['人'].some(function(u){ return u['ロール']==='acc'; });
+  renderAdmins();
+  var hasAcc = DB['人'].some(function(u){ return u['ロール']==='acc'; }) || (orgConfig && (orgConfig.admins||[]).length);
   var canEdit = me.role==='acc' || !hasAcc;
   $('conn-box').innerHTML =
     '<dl class="kv">'+
@@ -1613,9 +1768,18 @@ function renderSettings(){
           ? '<input type="text" data-user="'+u._row+'" data-f="部門" value="'+esc(u['部門'])+'" style="width:180px;font-size:.8rem;padding:3px 8px" placeholder="課長は担当の課">'
           : esc(u['部門']||'—'))+'</td></tr>';
     }).join('')+'</tbody></table></div>'+
-    '<p class="hint" style="margin-top:10px">ここに出るのは、一度ログインした人だけです。'+
+    '<p class="hint" style="margin-top:10px">'+
     '課長は「部門」に担当の課を書いてください。複数あるときは読点で区切ります。'+
-    (canEdit ? '' : 'ロールを変えられるのは経理だけです。')+'</p>';
+    (canEdit ? '' : 'ロールを変えられるのは経理だけです。')+'</p>'+
+    (canEdit ? '<div class="toolbar" style="margin-top:14px">'+
+      '<input type="text" id="person-new" placeholder="メールアドレス">'+
+      '<select id="person-role">'+Object.keys(ROLE_NAME).map(function(r){
+        return '<option value="'+r+'"'+(r==='mgr'?' selected':'')+'>'+ROLE_NAME[r]+'</option>'; }).join('')+'</select>'+
+      '<input type="text" id="person-dept" placeholder="部門（課長のとき）" style="width:190px">'+
+      '<button class="btn sm" id="btn-person-add">足す</button></div>'+
+      '<p class="hint" style="margin-top:6px">ログインしたことがない人も、先に登録しておけます。</p>' : '');
+  var pb = $('btn-person-add');
+  if(pb) pb.onclick = addPerson;
 }
 async function saveUser(row, field, value){
   var u = DB['人'].filter(function(x){ return x._row===row; })[0]; if(!u) return;
@@ -1715,17 +1879,24 @@ function wire(){
 
   $('btn-create').onclick = async function(){
     this.disabled=true; this.textContent='作っています…';
-    try{ await createSpreadsheet(); if($('drive-id').value) localStorage.setItem('cb_drive_id', idFromUrl($('drive-id').value));
-      driveRoot = localStorage.getItem('cb_drive_id'); await boot(); }
+    try{
+      await useDriveField();
+      await createSpreadsheet();
+      await writeFirstConfig();
+      await boot();
+    }
     catch(e){ toast('作れませんでした：'+e.message, true); this.disabled=false; this.textContent='新しく作る'; }
   };
   $('btn-connect').onclick = async function(){
     var v = idFromUrl($('ss-id').value);
-    if(!v){ toast('IDかURLを入れてください', true); return; }
-    ssId = v; localStorage.setItem('cb_ss_id', v);
-    if($('drive-id').value){ driveRoot = idFromUrl($('drive-id').value); localStorage.setItem('cb_drive_id', driveRoot); }
+    if(!v){ toast('スプレッドシートのURLを貼ってください', true); return; }
     this.disabled=true; this.textContent='つないでいます…';
-    await boot();
+    try{
+      ssId = v; localStorage.setItem('cb_ss_id', v);
+      await useDriveField();
+      await writeFirstConfig();
+      await boot();
+    }catch(e){ toast('つなげませんでした：'+e.message, true); }
     this.disabled=false; this.textContent='つなぐ';
   };
 
@@ -1783,7 +1954,7 @@ function wire(){
   };
 
   document.addEventListener('click', function(e){
-    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc]');
+    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc],[data-deladmin]');
     if(!t) return;
     var d = t.dataset;
     if(d.go){ setTab(d.go); window.scrollTo({top:0,behavior:'smooth'}); }
@@ -1797,6 +1968,7 @@ function wire(){
     else if(d.pay) markPaid(Number(d.pay));
     else if(d.ms) toggleMaster(Number(d.ms));
     else if(d.delalloc) delAlloc(d.delalloc);
+    else if(d.deladmin) removeAdmin(d.deladmin);
   });
   document.addEventListener('change', function(e){
     var s = e.target.closest('[data-user]');
