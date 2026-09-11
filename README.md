@@ -1,6 +1,6 @@
 # Choreia 予算
 
-**https://choreia-budget.pages.dev**
+**https://choreia.github.io/Budget/**
 
 
 研究開発予算管理表（購入物品リスト・入金管理・月次・マスタ）を置き換えるアプリです。
@@ -61,32 +61,9 @@
 
 ## セットアップ
 
-### 1. Google の設定（最初の1回）
+初回だけ、経理の方が1回やれば済みます。
 
-1. M2Labo 組織の GCP プロジェクトで、**OAuth 同意画面を「内部」**にする
-   （内部なら審査が要りません。外部にすると「確認されていないアプリ」の警告が出ます）
-2. 「Google Sheets API」と「Google Drive API」を有効にする
-3. 認証情報 → OAuth クライアント ID → **ウェブ アプリケーション**
-   - 承認済みの JavaScript 生成元に次の2つを入れる
-     - `https://choreia-budget.pages.dev`
-     - `http://localhost:8000`（ローカル確認用）
-4. できたクライアント ID を控える
-
-### 2. アプリに入れる
-
-ブラウザの開発者コンソールで1回だけ実行します。
-
-```js
-localStorage.setItem('cb_client_id', 'xxxxx.apps.googleusercontent.com')
-```
-
-組織のドメインが m2-labo.jp 以外のときは、あわせて
-
-```js
-localStorage.setItem('cb_domain', 'example.co.jp')
-```
-
-### 3. スプレッドシートを決める
+### スプレッドシートを決める
 
 ログインすると設定画面が出ます。
 
@@ -95,7 +72,7 @@ localStorage.setItem('cb_domain', 'example.co.jp')
 
 最初にログインした人が自動で **経理ロール** になります。あとはマスタ画面でロールを割り当ててください。
 
-### 4. みんなに配る
+### みんなに配る
 
 スプレッドシートを使う人全員に編集権限で共有してください。アプリは各自の権限で読み書きします。
 アプリ側で権限を絞っていても、スプレッドシートを直接開けば見えます。
@@ -103,22 +80,24 @@ localStorage.setItem('cb_domain', 'example.co.jp')
 
 ## デプロイ
 
-Cloudflare Pages（プロジェクト名 `choreia-budget`）。
+GitHub Pages。`main` に push すると反映されます。ほかの Choreia アプリと同じです。
 
 ```bash
-export CLOUDFLARE_API_TOKEN=$(cat /data/m2labo/secrets/cf_token_pages.txt)
-export CLOUDFLARE_ACCOUNT_ID=62dc38a1f4078181726662226f0eb6d0
-npx wrangler pages deploy web --project-name choreia-budget --branch main --commit-dirty=true
+git push
 ```
 
+Google のクライアントIDは、ほかの Choreia アプリと共通のものを使っています
+（承認済みの生成元が `https://choreia.github.io` なので、この置き場所でだけ動きます）。
+新しく作る必要はありません。
+
 ページ自体に会社のデータは入りません。金額も取引先も人の名前も、すべてスプレッドシート側にあります。
-スプレッドシートの ID とクライアント ID は各自のブラウザ（localStorage）に持つので、ファイルには書きません。
-検索避けに `noindex` と `robots.txt` を入れてあります。社内限定にしたいときは Cloudflare Access を1つ足せば済みます。
+スプレッドシートの ID は各自のブラウザ（localStorage）に持つので、ファイルには書きません。
+検索避けに `noindex` と `robots.txt` を入れてあります。
 
 ## ローカルで動かす
 
 ```bash
-cd web && python3 -m http.server 8000
+python3 -m http.server 8000
 # http://localhost:8000 を開く
 ```
 

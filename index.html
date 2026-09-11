@@ -506,8 +506,9 @@
    サーバーはありません。GitHub Pages + Google API だけで動きます。
    ============================================================ */
 
-var CLIENT_ID = localStorage.getItem('cb_client_id') || '';
-var SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
+/* ほかの Choreia アプリと共通のクライアントID（承認済みの生成元は https://choreia.github.io） */
+var CLIENT_ID = localStorage.getItem('cb_client_id') || '595564106580-hsrunbvfacmr23d2jopl462taqilip75.apps.googleusercontent.com';
+var SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive';
 var DOMAIN = localStorage.getItem('cb_domain') || 'm2-labo.jp';
 var SS_TITLE = 'Choreia 予算 データ';
 var TAX = 0.1;
@@ -571,18 +572,13 @@ function toast(msg, bad){
 
 /* ==================== 認証 ==================== */
 function initGIS(){
-  if(!CLIENT_ID){
-    $('gate').querySelector('.body').insertAdjacentHTML('afterbegin',
-      '<div class="err">このアプリのGoogleクライアントIDが設定されていません。README の手順で作成し、ブラウザのコンソールで '+
-      '<code class="k">localStorage.setItem("cb_client_id","xxxx.apps.googleusercontent.com")</code> を実行してから再読み込みしてください。</div>');
-    return;
-  }
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CLIENT_ID, scope: SCOPES, callback: onToken
   });
   var saved = sessionStorage.getItem('cb_token');
   if(saved){ accessToken=saved; start(true); }
 }
+
 async function onToken(resp){
   if(resp.error){ toast('ログインできませんでした', true); return; }
   accessToken = resp.access_token;
