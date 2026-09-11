@@ -312,6 +312,7 @@
       <button role="tab" aria-selected="false" data-t="cost"    data-roles="mgr acc pres">課のコスト</button>
       <button role="tab" aria-selected="false" data-t="gaps"    data-roles="user mgr acc pres">抜けているもの<span class="pipcount" id="cnt-gaps">0</span></button>
       <button role="tab" aria-selected="false" data-t="master"  data-roles="acc">マスタ</button>
+      <button role="tab" aria-selected="false" data-t="settings" data-roles="user mgr acc pres">設定</button>
     </nav>
 
     <main>
@@ -489,7 +490,17 @@
           <button class="btn sm" id="btn-ms-add">足す</button>
         </div>
         <div id="master-list"><div class="loading">読み込み中…</div></div>
-        <div class="card" style="margin-top:22px">
+      </section>
+
+      <!-- 設定 -->
+      <section id="settings" hidden>
+        <h2 class="scr">設定</h2>
+        <p class="lede">いまつないでいる場所と、人のロール。ロールを変えられるのは経理だけです。</p>
+        <div class="card" style="margin-bottom:20px">
+          <h3>つないでいる先</h3>
+          <div class="body" id="conn-box"></div>
+        </div>
+        <div class="card">
           <h3>人とロール</h3>
           <div class="body" id="users-box"></div>
         </div>
@@ -1486,18 +1497,49 @@ function renderMaster(){
     toast(stale.length+'件を止めました');
     await loadAll(); renderAll();
   };
-  // 人とロール
-  var roleName = {user:'一般ユーザ', mgr:'課長', acc:'経理', pres:'社長'};
-  $('users-box').innerHTML = '<div class="tablewrap" style="box-shadow:none"><table><thead><tr>'+
+}
+
+/* ==================== 設定 ==================== */
+var ROLE_NAME = {user:'一般ユーザ', mgr:'課長', acc:'経理', pres:'社長'};
+function renderSettings(){
+  var hasAcc = DB['人'].some(function(u){ return u['ロール']==='acc'; });
+  var canEdit = me.role==='acc' || !hasAcc;
+  $('conn-box').innerHTML =
+    '<dl class="kv">'+
+    '<dt>あなた</dt><dd>'+esc(me.name)+'　<span class="mono" style="color:var(--muted)">'+esc(me.email)+'</span></dd>'+
+    '<dt>ロール</dt><dd><b>'+esc(ROLE_NAME[me.role]||me.role)+'</b>'+(me.dept?'　'+esc(me.dept):'')+'</dd>'+
+    '<dt>スプレッドシート</dt><dd><a href="https://docs.google.com/spreadsheets/d/'+esc(ssId)+'/edit" target="_blank" rel="noopener">開く</a>'+
+      '　<span class="mono" style="color:var(--muted);font-size:.85em">'+esc(ssId)+'</span></dd>'+
+    '<dt>証憑フォルダ</dt><dd>'+(driveRoot ? '<a href="https://drive.google.com/drive/folders/'+esc(driveRoot)+'" target="_blank" rel="noopener">開く</a>' : '—')+'</dd>'+
+    '</dl>'+
+    '<div class="actions"><button class="btn ghost" id="btn-reconnect">つなぎ直す</button>'+
+    '<span class="hint">ほかのスプレッドシートに切り替えます。中身は消えません。</span></div>';
+  $('btn-reconnect').onclick = function(){
+    if(!confirm('つなぎ先を選び直します。データは消えません。')) return;
+    localStorage.removeItem('cb_ss_id'); localStorage.removeItem('cb_drive_id'); location.reload();
+  };
+
+  $('users-box').innerHTML =
+    (!hasAcc ? '<div class="err">経理ロールの人がまだいません。いまは誰でもロールを変えられます。'+
+      '最初に経理の方を決めてください。</div>' : '')+
+    '<div class="tablewrap" style="box-shadow:none"><table><thead><tr>'+
     '<th>名前</th><th>メール</th><th>ロール</th><th>部門</th></tr></thead><tbody>'+
     DB['人'].map(function(u){
-      return '<tr><td>'+esc(u['名前'])+'</td><td class="mono" style="font-size:.9em">'+esc(u['メール'])+'</td>'+
-        '<td><select data-user="'+u._row+'" data-f="ロール" style="width:auto;font-size:.8rem;padding:3px 8px">'+
-        Object.keys(roleName).map(function(r){ return '<option value="'+r+'"'+(u['ロール']===r?' selected':'')+'>'+roleName[r]+'</option>'; }).join('')+
-        '</select></td>'+
-        '<td><input type="text" data-user="'+u._row+'" data-f="部門" value="'+esc(u['部門'])+'" style="width:180px;font-size:.8rem;padding:3px 8px" placeholder="課長は担当の課"></td></tr>';
+      var mine = (u['メール']||'').toLowerCase()===me.email.toLowerCase();
+      return '<tr'+(mine?' style="background:var(--accent-soft)"':'')+'><td>'+esc(u['名前'])+(mine?'　<span class="pill p-info">あなた</span>':'')+'</td>'+
+        '<td class="mono" style="font-size:.9em">'+esc(u['メール'])+'</td>'+
+        '<td>'+(canEdit
+          ? '<select data-user="'+u._row+'" data-f="ロール" style="width:auto;font-size:.8rem;padding:3px 8px">'+
+            Object.keys(ROLE_NAME).map(function(r){ return '<option value="'+r+'"'+(u['ロール']===r?' selected':'')+'>'+ROLE_NAME[r]+'</option>'; }).join('')+
+            '</select>'
+          : esc(ROLE_NAME[u['ロール']]||u['ロール']))+'</td>'+
+        '<td>'+(canEdit
+          ? '<input type="text" data-user="'+u._row+'" data-f="部門" value="'+esc(u['部門'])+'" style="width:180px;font-size:.8rem;padding:3px 8px" placeholder="課長は担当の課">'
+          : esc(u['部門']||'—'))+'</td></tr>';
     }).join('')+'</tbody></table></div>'+
-    '<p class="hint" style="margin-top:10px">課長は「部門」に担当の課を書いてください。複数あるときは読点で区切ります。ここを変えると、その人に見える画面が変わります。</p>';
+    '<p class="hint" style="margin-top:10px">ここに出るのは、一度ログインした人だけです。'+
+    '課長は「部門」に担当の課を書いてください。複数あるときは読点で区切ります。'+
+    (canEdit ? '' : 'ロールを変えられるのは経理だけです。')+'</p>';
 }
 async function saveUser(row, field, value){
   var u = DB['人'].filter(function(x){ return x._row===row; })[0]; if(!u) return;
@@ -1555,6 +1597,7 @@ function applyRole(){
   TABS.forEach(function(b){
     var ok = (b.dataset.roles||'').split(' ').indexOf(me.role)>=0 || me.role==='acc';
     if(b.dataset.t==='master' && me.role!=='acc') ok = false;
+    if(b.dataset.t==='settings') ok = true;
     b.hidden = !ok;
     if(ok && !first) first = b;
     if(!ok) $(b.dataset.t).hidden = true;
@@ -1582,6 +1625,7 @@ function renderAll(){
   renderGaps();
   if(me.role!=='user') renderCost();
   if(me.role==='acc') renderMaster();
+  renderSettings();
   updateRoute();
 }
 
