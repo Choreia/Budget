@@ -396,9 +396,22 @@
                 <datalist id="dl-vendor"></datalist>
               </div>
               <div class="field">
+                <label for="f-invoice">インボイスNo</label>
+                <input type="text" id="f-invoice" list="dl-invoice" placeholder="T1234567890123">
+                <datalist id="dl-invoice"></datalist>
+                <div class="hint">仕訳に要ります。請求書の登録番号です。立替なら空で構いません。</div>
+              </div>
+            </div>
+            <div class="row2">
+              <div class="field">
                 <label for="f-pay">支払方法</label>
                 <select id="f-pay"></select>
                 <div class="hint">立替を選ぶと、返金までこの1件で追いかけます。</div>
+              </div>
+              <div class="field">
+                <label for="f-deliver">納品先</label>
+                <input type="text" id="f-deliver" list="dl-deliver" placeholder="D-BASE / M2事務所 など">
+                <datalist id="dl-deliver"></datalist>
               </div>
             </div>
             <div class="field tatebox" id="tatebox" hidden>
@@ -413,11 +426,29 @@
               <div class="field">
                 <label for="f-project">事業（補助事業のときだけ）</label>
                 <select id="f-project"></select>
-                <div class="hint" id="hint-project">補助事業を選ぶと、必要な証憑が増えます。</div>
+                <div class="hint" id="hint-project">事業によって必要な証憑が変わります。</div>
+              </div>
+              <div class="field">
+                <label for="f-order">発注した日</label>
+                <input type="date" id="f-order">
+              </div>
+            </div>
+            <div class="row2">
+              <div class="field">
+                <label for="f-plan">納品予定日</label>
+                <input type="date" id="f-plan">
               </div>
               <div class="field">
                 <label for="f-accepted">検収日（納品された日）</label>
                 <input type="date" id="f-accepted">
+                <div class="hint">納品後に入れます。あとから足せます。</div>
+              </div>
+            </div>
+            <div class="field">
+              <label>請求書の原本は郵送されますか</label>
+              <div class="chips" id="ch-genpon">
+                <button type="button" class="chip" aria-pressed="true" data-v="無">郵送なし</button>
+                <button type="button" class="chip" aria-pressed="false" data-v="有">郵送あり</button>
               </div>
             </div>
             <div class="field">
@@ -580,12 +611,16 @@ var SEED = {
 };
 
 /* 支払方法ごとに必ず要る証憑 */
-var EV_BY_PAY = {
-  '銀行振込': ['請求書'], '口座振替': ['請求書'], '海外送金': ['請求書'],
-  'M2クレカ': ['領収書'], '現金払い': ['領収書'], '立替': ['領収書']
-};
-var EV_SUBSIDY = ['見積書','発注書','納品書','請求書'];
+/* 名波さん 2026-09-11:
+   基本は請求書か領収書のどちらかが必須。あるものはすべて格納しておく。
+   事業によって必要な証憑は変わる（設定ファイルの projectEvidence で足す）。 */
+var EV_EITHER = ['請求書','領収書'];
 var PRES_LIMIT = 100000;
+
+/* 締めと支払（名波さん 2026-09-11）
+   仕入の請求書  … 毎月10日までに提出。月末締め、翌月末払い
+   立替の領収書  … 翌月1日までに提出。月末締め、翌月25日に給与とともに精算 */
+var DEADLINE = { invoiceDay: 10, receiptDay: 1, payDay: 'endOfNextMonth', refundDay: 25 };
 
 var ST = {DRAFT:'下書き', WAIT:'チェック待ち', PRES:'社長待ち', OK:'承認済', PAID:'支払済', REJ:'差し戻し', WD:'取り下げ'};
 
@@ -594,7 +629,7 @@ var tokenClient=null, accessToken=null, ssId=null, driveRoot=null;
 var me = {email:'', name:'', role:'user', dept:'', manager:''};
 var DB = {'購入':[], '入金':[], 'マスタ':[], '人':[], '按分':[]};
 var pendingFiles = [];
-var form = {dept:'', item:'', tate:'事前'};
+var form = {dept:'', item:'', tate:'事前', genpon:'無'};
 
 /* ==================== 小物 ==================== */
 function $(id){ return document.getElementById(id); }
@@ -1009,7 +1044,40 @@ function chips(el, list, key){
 }
 
 /* ==================== 証憑 ==================== */
-var EV_TYPES = ['見積書','発注書','納品書','請求書','領収書','その他'];
+var EV_TYPES = ['見積書','発注書','納品書','請求書','領収書','振込証憑','その他'];
+
+/* 経理への支払依頼。名波さんが使っている型そのまま。 */
+function payRequestText(e){
+  return [
+    '１．内容：' + (e['品名']||'') + 'の発注',
+    '２．金額：' + yen(e['税込']) + '(税込)',
+    '３．支払先：' + (e['購入先']||''),
+    '４．支払期限：' + (e['支払期限'] ? ymd(e['支払期限']) : dueOf(e)),
+    '５．納品予定日：' + (e['納品予定日'] ? ymd(e['納品予定日']) : (e['検収日'] ? ymd(e['検収日']) : '')),
+    '６．管理番号：No.' + (e.id||''),
+    '　　　　品名：' + (e['品名']||''),
+    '７．原本の郵送：' + (e['原本郵送'] || '無'),
+    '８．請求書：証憑フォルダに格納されているものを念のため添付いたします。',
+    e['証憑フォルダ'] ? ('　　' + e['証憑フォルダ']) : ''
+  ].filter(function(x){ return x !== ''; }).join('\n');
+}
+async function copyPayRequest(row){
+  var e = DB['購入'].filter(function(x){ return x._row===row; })[0]; if(!e) return;
+  var text = payRequestText(e);
+  try{
+    await navigator.clipboard.writeText(text);
+    toast('支払依頼の文面をコピーしました');
+  }catch(ex){
+    var bg = document.createElement('div'); bg.className='modalbg';
+    bg.innerHTML = '<div class="modal"><h3>支払依頼の文面</h3><div class="body">'+
+      '<textarea style="min-height:230px" readonly>'+esc(text)+'</textarea>'+
+      '<div class="actions"><button class="btn" id="m-close">閉じる</button></div></div></div>';
+    document.body.appendChild(bg);
+    bg.querySelector('textarea').select();
+    bg.querySelector('#m-close').onclick = function(){ bg.remove(); };
+    bg.onclick = function(ev){ if(ev.target===bg) bg.remove(); };
+  }
+}
 function renderFiles(){
   var box = $('filebox');
   if(!box){
@@ -1071,14 +1139,59 @@ function nextId(){
   DB['購入'].forEach(function(e){ var m = String(e.id||'').match(/^G(\d+)$/); if(m) mx = Math.max(mx, Number(m[1])); });
   return 'G' + String(mx+1).padStart(4,'0');
 }
+/* 事業ごとの必要証憑。設定ファイルで足せる。 */
+function projectEvidence(p){
+  if(!p || p==='なし') return [];
+  var m = (orgConfig && orgConfig.projectEvidence) || {};
+  return m[p] || [];
+}
 function evNeeded(e){
-  var need = (EV_BY_PAY[e['支払方法']] || []).slice();
-  if(num(e['税込']) >= PRES_LIMIT && need.indexOf('見積書')<0) need.push('見積書');
-  if(e['事業'] && e['事業']!=='なし') EV_SUBSIDY.forEach(function(t){ if(need.indexOf(t)<0) need.push(t); });
-  return need;
+  return projectEvidence(e['事業']).slice();
+}
+/* 請求書か領収書、どちらか1枚は要る */
+function hasEither(e){
+  return EV_EITHER.some(function(t){ return String(e[t]||'').toUpperCase()==='TRUE'; });
 }
 function evMissing(e){
-  return evNeeded(e).filter(function(t){ return String(e[t]||'').toUpperCase()!=='TRUE'; });
+  var miss = evNeeded(e).filter(function(t){ return String(e[t]||'').toUpperCase()!=='TRUE'; });
+  if(!hasEither(e) && miss.indexOf('請求書')<0 && miss.indexOf('領収書')<0){
+    miss.unshift(String(e['支払方法'])==='立替' ? '領収書' : '請求書');
+  }
+  return miss;
+}
+/* 仕訳を起こすのに要るもの（名波さん）＝項目・税込・支払方法・証憑・インボイスNo */
+function journalMissing(e){
+  var m = [];
+  if(!e['項目']) m.push('項目');
+  if(!num(e['税込'])) m.push('税込金額');
+  if(!e['支払方法']) m.push('支払方法');
+  if(!hasEither(e)) m.push('請求書か領収書');
+  if(!e['インボイスNo'] && String(e['支払方法'])!=='立替') m.push('インボイスNo');
+  return m;
+}
+function endOfNextMonth(from){
+  var d = from ? new Date(ymd(from)) : new Date();
+  if(isNaN(d)) d = new Date();
+  var y = d.getFullYear(), m = d.getMonth() + 2;   // 翌月の末日
+  return new Date(y, m, 0);
+}
+function nthOfNextMonth(from, day){
+  var d = from ? new Date(ymd(from)) : new Date();
+  if(isNaN(d)) d = new Date();
+  return new Date(d.getFullYear(), d.getMonth() + 1, day);
+}
+function fmtDate(d){ return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate()); }
+/* 支払（または精算）の予定日。名波さんの締めルールから出す。 */
+function dueOf(e){
+  var base = e['検収日'] || e['発注日'] || e['記入日時'];
+  if(String(e['支払方法'])==='立替') return fmtDate(nthOfNextMonth(base, DEADLINE.refundDay));
+  return fmtDate(endOfNextMonth(base));
+}
+/* 証憑を出す期限。請求書は毎月10日、立替の領収書は翌月1日。 */
+function submitDueOf(e){
+  var base = e['検収日'] || e['発注日'] || e['記入日時'];
+  if(String(e['支払方法'])==='立替') return fmtDate(nthOfNextMonth(base, DEADLINE.receiptDay));
+  return fmtDate(nthOfNextMonth(base, DEADLINE.invoiceDay));
 }
 function updateRoute(){
   var g = num($('f-gross').value);
@@ -1127,10 +1240,15 @@ async function submitEntry(asDraft){
       '立替区分': pay==='立替' ? form.tate : '',
       '事業': $('f-project').value==='なし' ? '' : $('f-project').value,
       '検収日': $('f-accepted').value, '証憑フォルダ': folder ? folder.webViewLink : '',
+      '発注日': $('f-order').value, '納品予定日': $('f-plan').value,
+      '納品先': $('f-deliver').value.trim(), 'インボイスNo': $('f-invoice').value.trim(),
+      '原本郵送': form.genpon || '無',
       '見積書':flags['見積書']||'', '発注書':flags['発注書']||'', '納品書':flags['納品書']||'',
-      '請求書':flags['請求書']||'', '領収書':flags['領収書']||'',
+      '請求書':flags['請求書']||'', '領収書':flags['領収書']||'', '振込証憑':flags['振込証憑']||'',
+      'その他':flags['その他']||'',
       '更新日時':nowStr(), '更新者':me.name
     };
+    e['支払期限'] = dueOf(e);
     await appendRow('購入', e);
     await bumpMaster('部門', form.dept);
     if(form.item) await bumpMaster('項目', form.item);
@@ -1145,8 +1263,9 @@ async function submitEntry(asDraft){
   }
 }
 function clearForm(){
-  ['f-name','f-why','f-net','f-gross','f-vendor','f-accepted'].forEach(function(i){ $(i).value=''; });
-  pendingFiles=[]; $('f-files').value=''; renderFiles(); form.item=''; 
+  ['f-name','f-why','f-net','f-gross','f-vendor','f-accepted','f-order','f-plan','f-deliver','f-invoice']
+    .forEach(function(i){ if($(i)) $(i).value=''; });
+  pendingFiles=[]; $('f-files').value=''; renderFiles(); form.item='';
   chips($('ch-item'),'項目','item'); updateRoute();
 }
 
@@ -1352,6 +1471,7 @@ function renderLedger(){
         '<td>'+esc(e['支払方法'])+'</td>'+
         '<td>'+(miss.length?'<span class="pill p-bad">不足</span>':ev)+'</td>'+
         '<td class="mono">'+md(e['支払日'])+'</td><td>'+statusPill(e)+
+        (e['状態']===ST.OK ? ' <button class="btn ghost sm" data-payreq="'+e._row+'">支払依頼の文面</button>' : '')+
         (me.role==='acc' && e['状態']===ST.OK ? ' <button class="btn sm" data-pay="'+e._row+'">支払済に</button>' : '')+
         '</td></tr>';
     }).join('')+'</tbody></table></div>'+
@@ -1576,12 +1696,26 @@ function findGaps(){
   DB['購入'].forEach(function(e){
     if(e['状態']===ST.DRAFT || e['状態']===ST.WD) return;
     if(!scope(e)) return;
+    var sub = e['部門']+' ／ '+(e['項目']||'項目未設定')+' ／ '+yen(e['税込']);
     var miss = evMissing(e);
-    if(miss.length) out.push({kind:'証憑', id:e.id, title:e['品名'],
-      sub:e['部門']+' ／ '+(e['項目']||'項目未設定')+' ／ '+yen(e['税込']),
-      what:miss.join('・')+'がない',
-      why:(e['事業']? '補助事業なので4点セットが要ります' : (e['支払方法']||'')+'なので'+miss[0]+'が要ります'),
-      who:e['記入者'], days:daysAgo(e['更新日時']||e['記入日時']), row:e._row, sheet:'購入'});
+    if(miss.length){
+      var limit = submitDueOf(e);
+      var late = daysAgo(limit);
+      out.push({kind:'証憑', id:e.id, title:e['品名'], sub:sub,
+        what:miss.join('・')+'がない',
+        why:(e['事業'] && projectEvidence(e['事業']).length
+              ? e['事業']+'は'+projectEvidence(e['事業']).join('・')+'が要ります'
+              : '請求書か領収書は必ず要ります')+
+            '（提出期限 '+limit+(late>0 ? '／'+late+'日すぎています' : '')+'）',
+        who:e['記入者'], days:Math.max(late, daysAgo(e['更新日時']||e['記入日時'])), row:e._row, sheet:'購入'});
+    }
+    if(e['状態']===ST.OK || e['状態']===ST.PAID){
+      var jm = journalMissing(e).filter(function(x){ return x!=='請求書か領収書'; });
+      if(jm.length) out.push({kind:'仕訳', id:e.id, title:e['品名'], sub:sub,
+        what:jm.join('・')+'がない',
+        why:'これが無いと経理が仕訳を起こせません', who:e['記入者'],
+        days:daysAgo(e['更新日時']||e['記入日時']), row:e._row, sheet:'購入'});
+    }
     if(!e['検収日'] && (e['状態']===ST.OK || e['状態']===ST.PAID))
       out.push({kind:'日付', id:e.id, title:e['品名'], sub:e['部門'], what:'検収日が空',
         why:'納品済のはずですが日付が入っていません', who:e['記入者'],
@@ -1612,11 +1746,12 @@ function renderGaps(){
   $('cnt-gaps').hidden = !g.length;
   var by = function(k){ return g.filter(function(x){ return x.kind===k; }).length; };
   $('gaps-tiles').innerHTML =
-    (by('証憑') ? '<div class="tile alert"><div class="k">証憑が足りない</div><div class="v">'+by('証憑')+'件</div><div class="n">支払方法と事業で決まります</div></div>'
+    (by('証憑') ? '<div class="tile alert"><div class="k">証憑が足りない</div><div class="v">'+by('証憑')+'件</div><div class="n">請求書か領収書は必ず要ります</div></div>'
                 : tile('証憑が足りない','0件','ありません')) +
+    (by('仕訳') ? '<div class="tile alert"><div class="k">仕訳が起こせない</div><div class="v">'+by('仕訳')+'件</div><div class="n">項目・インボイスNoなど</div></div>'
+                : tile('仕訳が起こせない','0件','ありません')) +
     tile('日付が空', by('日付')+'件', '検収日') +
-    tile('期日を過ぎている', by('入金')+'件', '入金の確認') +
-    tile('金額があやしい', by('金額')+'件', '税抜と税込の差');
+    tile('期日を過ぎている', by('入金')+'件', '入金の確認');
   if(!g.length){ $('gaps-list').innerHTML='<div class="empty">足りないものはありません。</div>'; }
   else {
     $('gaps-list').innerHTML = '<div class="tablewrap"><table><thead><tr>'+
@@ -1628,13 +1763,23 @@ function renderGaps(){
           '<td>'+(x.sheet==='購入' && x.kind==='証憑' ? '<button class="btn ghost sm" data-ev="'+x.row+'">証憑を上げる</button>' : '')+'</td></tr>';
       }).join('')+'</tbody></table></div>';
   }
-  var rules = [['銀行振込','請求書'],['M2クレカ','領収書 または カード明細'],['口座振替','請求書 または 利用明細'],
-    ['立替','領収書'],['海外送金','請求書'],['税込'+PRES_LIMIT.toLocaleString('ja-JP')+'円以上','上に加えて 見積書'],
-    ['補助事業（事業を選んだとき）','見積書・発注書・納品書・請求書の4点']];
+  var pe = (orgConfig && orgConfig.projectEvidence) || {};
+  var rules = [['すべて','請求書 か 領収書 のどちらか（必ず要る）'],
+               ['あるもの','見積書・発注書・納品書・振込証憑も、あれば全部入れる'],
+               ['仕訳に要るもの','項目・税込金額・支払方法・証憑・インボイスNo']];
+  Object.keys(pe).forEach(function(k){ rules.push([k+'（事業）', pe[k].join('・')]); });
+  var deadlines = [['仕入の請求書','毎月10日までに提出。月末締め、翌月末払い'],
+                   ['立替の領収書','翌月1日までに提出。月末締め、翌月25日に給与とともに精算']];
   $('rules-box').innerHTML = '<div class="tablewrap" style="box-shadow:none"><table style="min-width:0"><thead><tr>'+
     '<th>こういうとき</th><th>要る証憑</th></tr></thead><tbody>'+
     rules.map(function(r){ return '<tr><td>'+esc(r[0])+'</td><td>'+esc(r[1])+'</td></tr>'; }).join('')+
-    '</tbody></table></div><p class="hint" style="margin-top:10px">このルールは経理と決めたら変えられます。いまは仮置きです。</p>';
+    '</tbody></table></div>'+
+    '<h4 style="font-family:\'Zen Kaku Gothic New\',sans-serif;font-size:.88rem;margin:18px 0 8px">締めと支払</h4>'+
+    '<div class="tablewrap" style="box-shadow:none"><table style="min-width:0"><tbody>'+
+    deadlines.map(function(r){ return '<tr><td>'+esc(r[0])+'</td><td>'+esc(r[1])+'</td></tr>'; }).join('')+
+    '</tbody></table></div>'+
+    '<p class="hint" style="margin-top:10px">名波さんに教えていただいたルールです。'+
+    '事業ごとの必要証憑は、設定ファイルの projectEvidence で足せます。</p>';
 }
 function evModal(row){
   var e = DB['購入'].filter(function(x){ return x._row===row; })[0]; if(!e) return;
@@ -1910,9 +2055,17 @@ function renderAll(){
   var projs = mvals('事業').map(function(m){ return m['値']; });
   if($('f-project').options.length !== projs.length)
     $('f-project').innerHTML = projs.map(function(v){ return '<option>'+esc(v)+'</option>'; }).join('');
-  var vendors = {};
-  DB['購入'].forEach(function(e){ if(e['購入先']) vendors[e['購入先']]=1; });
-  $('dl-vendor').innerHTML = Object.keys(vendors).map(function(v){ return '<option value="'+esc(v)+'">'; }).join('');
+  var vendors = {}, delivers = {}, invoices = {};
+  DB['購入'].forEach(function(e){
+    if(e['購入先']) vendors[e['購入先']]=1;
+    if(e['納品先']) delivers[e['納品先']]=1;
+    if(e['インボイスNo']) invoices[e['インボイスNo']] = e['購入先'] || '';
+  });
+  var opts = function(o){ return Object.keys(o).map(function(v){ return '<option value="'+esc(v)+'">'; }).join(''); };
+  $('dl-vendor').innerHTML = opts(vendors);
+  $('dl-deliver').innerHTML = opts(delivers);
+  $('dl-invoice').innerHTML = Object.keys(invoices).map(function(v){
+    return '<option value="'+esc(v)+'">'+esc(invoices[v])+'</option>'; }).join('');
   renderMy();
   renderApprove();
   renderIncome();
@@ -1972,6 +2125,11 @@ function wire(){
     updateRoute();
   });
   $('f-project').addEventListener('change', updateRoute);
+  $('ch-genpon').onclick = function(e){
+    var b = e.target.closest('button'); if(!b) return;
+    form.genpon = b.dataset.v;
+    Array.prototype.forEach.call(this.children, function(c){ c.setAttribute('aria-pressed', c===b?'true':'false'); });
+  };
   $('ch-tate').onclick = function(e){
     var b = e.target.closest('button'); if(!b) return;
     form.tate = b.dataset.v;
@@ -2009,7 +2167,7 @@ function wire(){
   };
 
   document.addEventListener('click', function(e){
-    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc],[data-deladmin]');
+    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc],[data-deladmin],[data-payreq]');
     if(!t) return;
     var d = t.dataset;
     if(d.go){ setTab(d.go); window.scrollTo({top:0,behavior:'smooth'}); }
@@ -2024,6 +2182,7 @@ function wire(){
     else if(d.ms) toggleMaster(Number(d.ms));
     else if(d.delalloc) delAlloc(d.delalloc);
     else if(d.deladmin) removeAdmin(d.deladmin);
+    else if(d.payreq) copyPayRequest(Number(d.payreq));
   });
   document.addEventListener('change', function(e){
     var s = e.target.closest('[data-user]');
