@@ -971,9 +971,14 @@ async function boot(){
     // 列が増えたときだけ走る。ふだんは丸ごと飛ばす。
     if(localStorage.getItem(readyKey) !== '1'){
       busy('はじめの準備をしています…');
-      if(viaGas()){ await gas({action:'ensure'}); }
-      else { await ensureTabs(); await seedMasters(); }
-      localStorage.setItem(readyKey, '1');
+      try{
+        if(viaGas()){ await gas({action:'ensure'}); }
+        else { await ensureTabs(); await seedMasters(); }
+        localStorage.setItem(readyKey, '1');
+      }catch(e){
+        // 準備に失敗しても読み込みは続ける。ここで止めると画面が出ない。
+        setTimeout(function(){ toast('準備の一部ができませんでした：'+e.message, true); }, 1200);
+      }
     }
     // まず小さいものだけ読んで画面を出す
     busy('読み込んでいます…');
@@ -999,7 +1004,9 @@ async function boot(){
     localStorage.removeItem(readyKey);
     $('setup').hidden = false;
     $('setup').querySelector('.body').insertAdjacentHTML('afterbegin',
-      '<div class="err">スプレッドシートを開けませんでした。URLが正しいか、共有されているかを確認してください。<br><span class="mono">'+esc(e.message)+'</span></div>');
+      '<div class="err">'+esc(e.message)+
+      '<div style="margin-top:8px;font-size:.9em;color:var(--sub)">ログイン中：<span class="mono">'+esc(me.email||'不明')+'</span>'+
+      (viaGas() ? '　書き込み役：使用中' : '　書き込み役：なし')+'</div></div>');
   }
 }
 /* 必要なシートだけ、1回のリクエストでまとめて読む */

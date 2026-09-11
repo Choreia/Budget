@@ -54,7 +54,7 @@ function doPost(e) {
 
     var me = lookupPerson(email);
     switch (req.action) {
-      case 'ping':   return json({ ok: true, email: email, role: me.role });
+      case 'ping':   return json({ ok: true, email: email, role: me.role, depts: me.depts });
       case 'ensure': return json(doEnsure(me));
       case 'read':   return json(doRead(me, req.sheets));
       case 'append': return json(doAppend(me, req.sheet, req.row));
@@ -175,7 +175,8 @@ function appendRaw(name, obj) {
 
 /* ==================== 操作 ==================== */
 function doEnsure(me) {
-  if (me.role !== 'acc') return { error: '準備ができるのは経理だけです。' };
+  // 誰が呼んでも通します。足りない列を足して、マスタが空なら初期値を入れるだけで、
+  // 既にあるデータには触りません。ここで止めると、新しく入った人がアプリを開けなくなります。
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
