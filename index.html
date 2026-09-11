@@ -253,6 +253,13 @@
   .err{background:var(--bad-soft); border:1px solid var(--bad); border-radius:10px; padding:12px 15px;
     font-size:.83rem; color:var(--ink); margin-bottom:16px}
   .setup dl{margin:0 0 16px}
+  .choice{border:1px solid var(--line2); border-radius:11px; padding:16px 18px; margin-top:16px; background:var(--panel2)}
+  .choice h3{font-family:"Zen Kaku Gothic New",sans-serif; font-weight:700; font-size:.9rem; margin:0 0 4px}
+  .choice p{font-size:.82rem; color:var(--sub); margin:0 0 12px}
+  .choice .hint{margin-top:6px}
+  .opt{margin-top:18px}
+  .opt summary{cursor:pointer; font-size:.82rem; color:var(--accent-deep); font-weight:700}
+  .opt summary::marker{color:var(--accent)}
   code.k{font-family:"IBM Plex Mono",monospace; font-size:.82em; background:var(--panel2);
     border:1px solid var(--line); border-radius:5px; padding:1px 6px}
 
@@ -284,20 +291,29 @@
       <div class="body">
         <h2>はじめの設定</h2>
         <p>データを入れるスプレッドシートを決めます。最初の1回だけです。</p>
-        <div class="field">
-          <label for="ss-id">すでにあるスプレッドシートを使う</label>
-          <input type="text" id="ss-id" placeholder="スプレッドシートのIDまたはURL">
-          <div class="hint">URLの <code class="k">/d/</code> と <code class="k">/edit</code> のあいだの文字列です。</div>
+
+        <div class="choice">
+          <h3>はじめてなら</h3>
+          <p>「Choreia 予算 データ」を作って、6つのタブと見出しを入れます。</p>
+          <button class="btn" id="btn-create">新しく作る</button>
         </div>
-        <div class="actions">
-          <button class="btn" id="btn-connect">つなぐ</button>
-          <button class="btn ghost" id="btn-create">新しく作る</button>
+
+        <div class="choice">
+          <h3>すでにあるものを使うなら</h3>
+          <p>ほかの人が作ったシートにつなぐときはこちら。</p>
+          <input type="text" id="ss-id" placeholder="スプレッドシートのURLを貼る">
+          <div class="hint">URL をまるごと貼って大丈夫です。</div>
+          <button class="btn ghost" id="btn-connect" style="margin-top:12px">つなぐ</button>
         </div>
-        <div class="field" style="margin-top:22px">
-          <label for="drive-id">証憑を入れるGoogleドライブのフォルダ（任意）</label>
-          <input type="text" id="drive-id" placeholder="フォルダIDまたはURL">
-          <div class="hint">空のままなら、あなたのマイドライブに「Choreia 予算 証憑」を作ります。</div>
-        </div>
+
+        <details class="opt">
+          <summary>証憑の入れ場所を指定する（任意）</summary>
+          <div class="field" style="margin-top:12px">
+            <label for="drive-id">Googleドライブのフォルダ</label>
+            <input type="text" id="drive-id" placeholder="フォルダのURLを貼る">
+            <div class="hint">空のままなら、マイドライブに「Choreia 予算 証憑」を作ります。</div>
+          </div>
+        </details>
       </div>
     </div>
   </section>
