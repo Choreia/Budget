@@ -662,6 +662,8 @@ async function start(silent){
 /* ほかの Choreia アプリと同じ作法。Drive に choreia-budget-config.json を1つ置き、
    全員がそれを見つけてつなぐ。管理者はここにメールで登録する。 */
 var CONFIG_FILENAME = 'choreia-budget-config.json';
+/* 誰が設定しても、この人たちは必ず管理者（経理ロール） */
+var DEFAULT_ADMINS = ['r.yasukouchi@m2-labo.jp'];
 var CONFIG_CACHE = 'cb_config_cache';
 var orgConfig = null;
 
@@ -724,16 +726,23 @@ async function useDriveField(){
 async function writeFirstConfig(){
   if(orgConfig && orgConfig.spreadsheetId) return;
   orgConfig = {
-    domain: me.domain, admin: me.email, admins: [me.email], adminName: me.name,
+    domain: me.domain, admin: me.email, admins: [me.email].concat(
+      DEFAULT_ADMINS.filter(function(a){ return a !== String(me.email).toLowerCase(); })), adminName: me.name,
     spreadsheetId: ssId, folderId: driveRoot || '', createdAt: new Date().toISOString()
   };
   try{ await saveConfig(); }
   catch(e){ toast('設定ファイルを置けませんでした。あなたの端末でだけ動きます。', true); }
 }
+function adminList(){
+  var list = (orgConfig && (orgConfig.admins || (orgConfig.admin ? [orgConfig.admin] : []))) || [];
+  DEFAULT_ADMINS.forEach(function(a){
+    if(list.map(function(x){ return String(x).toLowerCase(); }).indexOf(a) < 0) list = list.concat([a]);
+  });
+  return list;
+}
 function isAdmin(email){
-  if(!orgConfig) return false;
-  var list = orgConfig.admins || (orgConfig.admin ? [orgConfig.admin] : []);
-  return list.map(function(x){ return String(x).toLowerCase(); }).indexOf(String(email||'').toLowerCase()) >= 0;
+  return adminList().map(function(x){ return String(x).toLowerCase(); })
+    .indexOf(String(email||'').toLowerCase()) >= 0;
 }
 function signOut(){
   if(accessToken && window.google) google.accounts.oauth2.revoke(accessToken, function(){});
@@ -1719,7 +1728,7 @@ function renderAdmins(){
     };
     return;
   }
-  var list = (orgConfig && (orgConfig.admins || (orgConfig.admin ? [orgConfig.admin] : []))) || [];
+  var list = adminList();
   var owner = orgConfig && (orgConfig.admin || list[0]);
   var can = isAdmin(me.email);
   $('admin-box').innerHTML =
