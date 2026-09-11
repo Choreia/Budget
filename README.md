@@ -1,5 +1,8 @@
 # Choreia 予算
 
+**https://choreia-budget.pages.dev**
+
+
 研究開発予算管理表（購入物品リスト・入金管理・月次・マスタ）を置き換えるアプリです。
 サーバーはありません。ブラウザから直接 Google スプレッドシートと Google ドライブを読み書きします。
 
@@ -64,8 +67,9 @@
    （内部なら審査が要りません。外部にすると「確認されていないアプリ」の警告が出ます）
 2. 「Google Sheets API」と「Google Drive API」を有効にする
 3. 認証情報 → OAuth クライアント ID → **ウェブ アプリケーション**
-   - 承認済みの JavaScript 生成元にアプリの URL を入れる
-     （例：`https://choreia.github.io`、ローカル確認用に `http://localhost:8000`）
+   - 承認済みの JavaScript 生成元に次の2つを入れる
+     - `https://choreia-budget.pages.dev`
+     - `http://localhost:8000`（ローカル確認用）
 4. できたクライアント ID を控える
 
 ### 2. アプリに入れる
@@ -96,6 +100,20 @@ localStorage.setItem('cb_domain', 'example.co.jp')
 スプレッドシートを使う人全員に編集権限で共有してください。アプリは各自の権限で読み書きします。
 アプリ側で権限を絞っていても、スプレッドシートを直接開けば見えます。
 運用が固まったら、スプレッドシートは閲覧のみにして、書き込みはアプリ経由だけにするのが安全です。
+
+## デプロイ
+
+Cloudflare Pages（プロジェクト名 `choreia-budget`）。
+
+```bash
+export CLOUDFLARE_API_TOKEN=$(cat /data/m2labo/secrets/cf_token_pages.txt)
+export CLOUDFLARE_ACCOUNT_ID=62dc38a1f4078181726662226f0eb6d0
+npx wrangler pages deploy web --project-name choreia-budget --branch main --commit-dirty=true
+```
+
+ページ自体に会社のデータは入りません。金額も取引先も人の名前も、すべてスプレッドシート側にあります。
+スプレッドシートの ID とクライアント ID は各自のブラウザ（localStorage）に持つので、ファイルには書きません。
+検索避けに `noindex` と `robots.txt` を入れてあります。社内限定にしたいときは Cloudflare Access を1つ足せば済みます。
 
 ## ローカルで動かす
 
