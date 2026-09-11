@@ -232,6 +232,8 @@
   .gatebox p{color:var(--sub); font-size:.88rem; margin:0 0 18px}
   .loading{color:var(--muted); font-size:.85rem; padding:26px 2px}
   .empty{color:var(--muted); font-size:.85rem; padding:22px; text-align:center}
+  #busy{position:fixed; inset:0; background:var(--paper); z-index:70; display:grid; place-items:center}
+  #busy div{color:var(--sub); font-size:.9rem; font-weight:700}
   #toast{position:fixed; left:50%; bottom:26px; transform:translateX(-50%); z-index:60;
     display:flex; flex-direction:column; gap:8px; align-items:center; pointer-events:none}
   #toast div{background:var(--ink); color:var(--paper); font-size:.84rem; font-weight:700;
@@ -253,13 +255,16 @@
   .err{background:var(--bad-soft); border:1px solid var(--bad); border-radius:10px; padding:12px 15px;
     font-size:.83rem; color:var(--ink); margin-bottom:16px}
   .setup dl{margin:0 0 16px}
-  .choice{border:1px solid var(--line2); border-radius:11px; padding:16px 18px; margin-top:16px; background:var(--panel2)}
-  .choice h3{font-family:"Zen Kaku Gothic New",sans-serif; font-weight:700; font-size:.9rem; margin:0 0 4px}
-  .choice p{font-size:.82rem; color:var(--sub); margin:0 0 12px}
-  .choice .hint{margin-top:6px}
-  .opt{margin-top:18px}
-  .opt summary{cursor:pointer; font-size:.82rem; color:var(--accent-deep); font-weight:700}
-  .opt summary::marker{color:var(--accent)}
+  .step{display:grid; grid-template-columns:28px 1fr; gap:14px; align-items:start;
+    border:1px solid var(--line2); border-radius:11px; padding:16px 18px; margin-top:16px; background:var(--panel2)}
+  .stepno{width:28px; height:28px; border-radius:50%; display:grid; place-items:center;
+    background:var(--accent); color:#fff; font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:.82rem}
+  .step h3{font-family:"Zen Kaku Gothic New",sans-serif; font-weight:700; font-size:.9rem; margin:0 0 4px}
+  .step p{font-size:.82rem; color:var(--sub); margin:0 0 12px}
+  .step .hint{margin-top:6px}
+  .step .actions{margin-top:14px}
+  .opt-tag{font-size:.7rem; font-weight:700; color:var(--muted); background:var(--card);
+    border:1px solid var(--line2); border-radius:999px; padding:1px 8px; margin-left:8px; vertical-align:middle}
   code.k{font-family:"IBM Plex Mono",monospace; font-size:.82em; background:var(--panel2);
     border:1px solid var(--line); border-radius:5px; padding:1px 6px}
 
@@ -290,30 +295,31 @@
     <div class="card gatebox setup">
       <div class="body">
         <h2>はじめの設定</h2>
-        <p>データを入れるスプレッドシートを決めます。最初の1回だけです。</p>
+        <p>データの置き場所を決めます。最初の1回だけです。</p>
 
-        <div class="choice">
-          <h3>はじめてなら</h3>
-          <p>「Choreia 予算 データ」を作って、6つのタブと見出しを入れます。</p>
-          <button class="btn" id="btn-create">新しく作る</button>
-        </div>
-
-        <div class="choice">
-          <h3>すでにあるものを使うなら</h3>
-          <p>ほかの人が作ったシートにつなぐときはこちら。</p>
-          <input type="text" id="ss-id" placeholder="スプレッドシートのURLを貼る">
-          <div class="hint">URL をまるごと貼って大丈夫です。</div>
-          <button class="btn ghost" id="btn-connect" style="margin-top:12px">つなぐ</button>
-        </div>
-
-        <details class="opt">
-          <summary>証憑の入れ場所を指定する（任意）</summary>
-          <div class="field" style="margin-top:12px">
-            <label for="drive-id">Googleドライブのフォルダ</label>
+        <div class="step">
+          <span class="stepno">1</span>
+          <div>
+            <h3>証憑を入れるフォルダ<span class="opt-tag">任意</span></h3>
+            <p>見積書や請求書を入れるGoogleドライブのフォルダです。</p>
             <input type="text" id="drive-id" placeholder="フォルダのURLを貼る">
-            <div class="hint">空のままなら、マイドライブに「Choreia 予算 証憑」を作ります。</div>
+            <div class="hint">空のままなら、マイドライブに「Choreia 予算 証憑」を作ります。<br>
+              みんなで使うなら、共有フォルダのURLを貼ってください。</div>
           </div>
-        </details>
+        </div>
+
+        <div class="step">
+          <span class="stepno">2</span>
+          <div>
+            <h3>データを入れるスプレッドシート</h3>
+            <p>はじめてなら「新しく作る」。ほかの人が作ったものにつなぐなら、URLを貼ってから「つなぐ」。</p>
+            <input type="text" id="ss-id" placeholder="スプレッドシートのURLを貼る（つなぐときだけ）">
+            <div class="actions">
+              <button class="btn" id="btn-create">新しく作る</button>
+              <button class="btn ghost" id="btn-connect">つなぐ</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -650,9 +656,30 @@ async function api(url, opts){
 function A1(sheet, range){ return encodeURIComponent(sheet+'!'+range); }
 var SS = 'https://sheets.googleapis.com/v4/spreadsheets/';
 
+/* 列数ぶんだけ読む。BB100000 まで読むと無駄に重い。 */
+function colLetter(n){
+  var s = '';
+  while(n > 0){ var m = (n-1) % 26; s = String.fromCharCode(65+m) + s; n = Math.floor((n-1)/26); }
+  return s;
+}
+function sheetRange(name, rows){
+  return 'A1:' + colLetter(SHEETS[name].length) + (rows || 5000);
+}
+function parseRows(r){
+  var rows = r && r.values || [];
+  if(rows.length < 1) return [];
+  var head = rows[0], out=[];
+  for(var i=1;i<rows.length;i++){
+    if(!rows[i] || !rows[i].join('')) continue;
+    var o = {_row:i+1};
+    for(var j=0;j<head.length;j++) o[head[j]] = rows[i][j]!==undefined ? rows[i][j] : '';
+    out.push(o);
+  }
+  return out;
+}
 async function readSheet(name){
   var r;
-  try{ r = await api(SS+ssId+'/values/'+A1(name,'A1:BB100000')); }
+  try{ r = await api(SS+ssId+'/values/'+A1(name, sheetRange(name))); }
   catch(e){ return []; }
   var rows = r.values || [];
   if(rows.length < 1) return [];
@@ -701,14 +728,16 @@ async function ensureTabs(){
       requests: missing.map(function(n){ return {addSheet:{properties:{title:n}}}; })
     })});
   }
-  // 見出し行を書く（1行目が空のときだけ）
+  // 見出し行を書く（1行目が空のときだけ）。6枚まとめて1回で読む。
+  var names = Object.keys(SHEETS);
+  var qs = names.map(function(n){ return 'ranges='+A1(n,'A1:BB1'); }).join('&');
+  var got = await api(SS+ssId+'/values:batchGet?'+qs);
+  var ranges = got.valueRanges || [];
   var data = [];
-  for(var n in SHEETS){
-    var r = await api(SS+ssId+'/values/'+A1(n,'A1:BB1'));
-    if(!r.values || !r.values.length || !(r.values[0]||[]).join('')){
-      data.push({range: n+'!A1', values:[SHEETS[n]]});
-    }
-  }
+  names.forEach(function(n, i){
+    var v = (ranges[i]||{}).values;
+    if(!v || !v.length || !(v[0]||[]).join('')) data.push({range: n+'!A1', values:[SHEETS[n]]});
+  });
   if(data.length){
     await api(SS+ssId+'/values:batchUpdate', {method:'POST',
       body: JSON.stringify({valueInputOption:'RAW', data:data})});
@@ -724,21 +753,21 @@ async function seedMasters(){
   await api(SS+ssId+'/values/'+A1('マスタ','A2')+'?valueInputOption=RAW',
     {method:'PUT', body: JSON.stringify({values:rows})});
 }
+/* DB['人'] は読み込み済みの前提。足りないときだけ書きに行く。 */
 async function ensureMe(){
-  var users = await readSheet('人');
+  var users = DB['人'] || [];
   var row = users.filter(function(u){ return (u['メール']||'').toLowerCase() === me.email.toLowerCase(); })[0];
   if(!row){
     // 最初のひとりは経理ロール（設定した人）
     var role = users.length ? 'user' : 'acc';
-    row = {'メール':me.email, '名前':me.name, 'ロール':role, '部門':'', '上長メール':''};
+    row = {'メール':me.email, '名前':me.name, 'ロール':role, '部門':'', '上長メール':'', _row: users.length + 2};
     await appendRow('人', row);
-    users = await readSheet('人');
-    row = users.filter(function(u){ return (u['メール']||'').toLowerCase() === me.email.toLowerCase(); })[0] || row;
+    users.push(row);
+    DB['人'] = users;
   }
   me.role = row['ロール'] || 'user';
   me.dept = row['部門'] || '';
   me.manager = row['上長メール'] || '';
-  DB['人'] = users;
 }
 async function ensureDriveRoot(){
   if(driveRoot) return;
@@ -753,25 +782,55 @@ async function ensureDriveRoot(){
   localStorage.setItem('cb_drive_id', driveRoot);
 }
 async function boot(){
+  var readyKey = 'cb_ready_' + ssId;
   try{
-    await ensureTabs();
-    await seedMasters();
+    // 初回だけ。タブと見出しの用意はそのあと毎回やる必要がない。
+    if(localStorage.getItem(readyKey) !== '1'){
+      busy('はじめの準備をしています…');
+      await ensureTabs();
+      await seedMasters();
+      localStorage.setItem(readyKey, '1');
+    }
+    // まず小さいものだけ読んで画面を出す
+    busy('読み込んでいます…');
+    var small = await loadSome(['マスタ','人']);
+    if(small.err) throw small.err;
     await ensureMe();
-    await ensureDriveRoot();
-    await loadAll();
     $('setup').hidden = true;
     $('appmain').hidden = false;
+    busy(false);
     renderAll();
+    // 残りは後ろで読んで、届いたら描き直す
+    loadSome(['購入','入金','按分']).then(function(){
+      renderAll();
+      if(!driveRoot) ensureDriveRoot();
+    });
   }catch(e){
+    busy(false);
+    localStorage.removeItem(readyKey);
     $('setup').hidden = false;
     $('setup').querySelector('.body').insertAdjacentHTML('afterbegin',
-      '<div class="err">スプレッドシートを開けませんでした。IDが正しいか、共有されているかを確認してください。<br><span class="mono">'+esc(e.message)+'</span></div>');
+      '<div class="err">スプレッドシートを開けませんでした。URLが正しいか、共有されているかを確認してください。<br><span class="mono">'+esc(e.message)+'</span></div>');
   }
 }
-async function loadAll(){
-  var names = ['購入','入金','マスタ','人','按分'];
-  var res = await Promise.all(names.map(readSheet));
-  names.forEach(function(n,i){ DB[n] = res[i]; });
+/* 必要なシートだけ、1回のリクエストでまとめて読む */
+async function loadSome(names){
+  try{
+    var qs = names.map(function(n){ return 'ranges='+A1(n, sheetRange(n)); }).join('&');
+    var got = await api(SS+ssId+'/values:batchGet?'+qs);
+    (got.valueRanges||[]).forEach(function(r, i){ DB[names[i]] = parseRows(r); });
+    return {};
+  }catch(e){ return {err:e}; }
+}
+async function loadAll(){ await loadSome(['購入','入金','マスタ','人','按分']); }
+function busy(msg){
+  var el = $('busy');
+  if(!el){
+    document.body.insertAdjacentHTML('beforeend', '<div id="busy"><div></div></div>');
+    el = $('busy');
+  }
+  el.hidden = !msg;
+  if(msg) el.firstChild.textContent = msg;
 }
 
 /* ==================== マスタ ==================== */
@@ -846,6 +905,7 @@ function guessType(name){
   return '請求書';
 }
 async function createFolder(name){
+  if(!driveRoot) await ensureDriveRoot();
   var f = await api('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink',
     {method:'POST', body: JSON.stringify({name:name, mimeType:'application/vnd.google-apps.folder', parents:[driveRoot]})});
   await shareInDomain(f.id);
