@@ -942,7 +942,8 @@ async function ensureMe(){
     // 最初のひとりは経理ロール（設定した人）
     var role = users.length ? 'user' : 'acc';
     row = {'メール':me.email, '名前':me.name, 'ロール':role, '部門':'', '上長メール':'', _row: users.length + 2};
-    await appendRow('人', row);
+    // 書き込み役を使っているときは、あちらが先に登録している。失敗しても進める。
+    try{ await appendRow('人', row); }catch(e){}
     users.push(row);
     DB['人'] = users;
   }
