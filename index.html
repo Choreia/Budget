@@ -233,7 +233,9 @@
   .loading{color:var(--muted); font-size:.85rem; padding:26px 2px}
   .empty{color:var(--muted); font-size:.85rem; padding:22px; text-align:center}
   #busy{position:fixed; inset:0; background:var(--paper); z-index:70; display:grid; place-items:center}
-  #busy div{color:var(--sub); font-size:.9rem; font-weight:700}
+  #busy .brand{text-align:center; font-size:1.3rem}
+  #busy small{display:block; margin-top:10px; color:var(--muted); font-size:.82rem;
+    font-family:"Noto Sans JP",sans-serif; font-weight:400; letter-spacing:0}
   #toast{position:fixed; left:50%; bottom:26px; transform:translateX(-50%); z-index:60;
     display:flex; flex-direction:column; gap:8px; align-items:center; pointer-events:none}
   #toast div{background:var(--ink); color:var(--paper); font-size:.84rem; font-weight:700;
@@ -283,7 +285,7 @@
   </header>
 
   <!-- ================= ログイン前 ================= -->
-  <section id="gate">
+  <section id="gate" hidden>
     <div class="card gatebox">
       <div class="body">
         <h2>Choreia 予算</h2>
@@ -635,6 +637,8 @@ async function start(silent){
     me.name  = about.user.displayName || me.email;
   }catch(e){
     accessToken=null; sessionStorage.removeItem('cb_token');
+    busy(false);
+    $('gate').hidden = false;
     if(!silent) toast('ログインの有効期限が切れています', true);
     return;
   }
@@ -954,11 +958,12 @@ async function loadAll(){ await loadSome(['購入','入金','マスタ','人','�
 function busy(msg){
   var el = $('busy');
   if(!el){
-    document.body.insertAdjacentHTML('beforeend', '<div id="busy"><div></div></div>');
+    document.body.insertAdjacentHTML('beforeend',
+      '<div id="busy"><div class="brand">Choreia <span>予算</span><small></small></div></div>');
     el = $('busy');
   }
   el.hidden = !msg;
-  if(msg) el.firstChild.textContent = msg;
+  if(msg) el.querySelector('small').textContent = msg;
 }
 
 /* ==================== マスタ ==================== */
@@ -2056,6 +2061,27 @@ function reopen(row){
 /* ==================== 起動 ==================== */
 window.addEventListener('DOMContentLoaded', wire);
 window.onGisLoad = initGIS;
+
+/* 前に戻ってきた人にログイン画面を一瞬見せない。
+   先にトークンの有無だけ見て、出す画面を決めてから描く。 */
+(function preflight(){
+  var hasToken = false;
+  try{ hasToken = !!sessionStorage.getItem('cb_token'); }catch(e){}
+  if(hasToken){
+    busy('読み込んでいます…');
+    // GIS が読めないときに固まらないように
+    setTimeout(function(){
+      if(!accessToken || !me.email){
+        var b = $('busy');
+        if(b && !b.hidden && $('appmain').hidden && $('setup').hidden){
+          busy(false); $('gate').hidden = false;
+        }
+      }
+    }, 8000);
+  } else {
+    $('gate').hidden = false;
+  }
+})();
 
 </script>
 <script src="https://accounts.google.com/gsi/client" async defer onload="onGisLoad()"></script>
