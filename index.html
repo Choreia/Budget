@@ -6,7 +6,7 @@
 <title>Choreia 予算</title>
 <meta name="robots" content="noindex, nofollow">
 <meta name="description" content="購入の申請から支払いまでを1画面で。データは会社のGoogleスプレッドシートに入ります。">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://www.googleapis.com https://sheets.googleapis.com https://accounts.google.com; frame-src https://accounts.google.com; img-src 'self' https://*.googleusercontent.com data: blob:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://www.googleapis.com https://sheets.googleapis.com https://accounts.google.com https://script.google.com https://script.googleusercontent.com; frame-src https://accounts.google.com; img-src 'self' https://*.googleusercontent.com data: blob:;">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Zen+Kaku+Gothic+New:wght@700;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -802,6 +802,21 @@ async function api(url, opts){
   return res.json();
 }
 function A1(sheet, range){ return encodeURIComponent(sheet+'!'+range); }
+
+/* 書き込み役（Apps Script）を経由するかどうか。
+   経由する設定なら、記入する人はスプレッドシートの権限を持たなくていい。 */
+function viaGas(){ return !!(orgConfig && orgConfig.apiUrl); }
+async function gas(payload){
+  var res = await fetch(orgConfig.apiUrl, {
+    method: 'POST',
+    headers: {'Content-Type':'text/plain;charset=utf-8'},   // 余計な事前確認を起こさないため
+    body: JSON.stringify(Object.assign({token: accessToken}, payload))
+  });
+  if(!res.ok) throw new Error('書き込み役に届きませんでした（'+res.status+'）');
+  var j = await res.json();
+  if(j.error) throw new Error(j.error);
+  return j;
+}
 var SS = 'https://sheets.googleapis.com/v4/spreadsheets/';
 
 /* 列数ぶんだけ読む。BB100000 まで読むと無駄に重い。 */
@@ -830,6 +845,10 @@ function parseRows(r, name){
   return out;
 }
 async function readSheet(name){
+  if(viaGas()){
+    try{ var g = await gas({action:'read', sheets:[name]}); return parseRows({values:g.values[name]||[]}, name); }
+    catch(e){ return []; }
+  }
   var r;
   try{ r = await api(SS+ssId+'/values/'+A1(name, sheetRange(name))); }
   catch(e){ return []; }
@@ -840,11 +859,13 @@ function toArr(name, obj){
   return head.map(function(h){ return obj[h]!==undefined && obj[h]!==null ? String(obj[h]) : ''; });
 }
 async function appendRow(name, obj){
+  if(viaGas()){ await gas({action:'append', sheet:name, row:obj}); return; }
   await api(SS+ssId+'/values/'+A1(name,'A1')+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',
     {method:'POST', body: JSON.stringify({values:[toArr(name,obj)]})});
 }
 async function saveRow(name, obj){
   if(!obj._row) return appendRow(name, obj);
+  if(viaGas()){ await gas({action:'update', sheet:name, row:obj, rowIndex:obj._row}); return; }
   await api(SS+ssId+'/values/'+A1(name,'A'+obj._row)+'?valueInputOption=RAW',
     {method:'PUT', body: JSON.stringify({values:[toArr(name,obj)]})});
 }
@@ -949,8 +970,8 @@ async function boot(){
     // 列が増えたときだけ走る。ふだんは丸ごと飛ばす。
     if(localStorage.getItem(readyKey) !== '1'){
       busy('はじめの準備をしています…');
-      await ensureTabs();
-      await seedMasters();
+      if(viaGas()){ await gas({action:'ensure'}); }
+      else { await ensureTabs(); await seedMasters(); }
       localStorage.setItem(readyKey, '1');
     }
     // まず小さいものだけ読んで画面を出す
@@ -983,6 +1004,11 @@ async function boot(){
 /* 必要なシートだけ、1回のリクエストでまとめて読む */
 async function loadSome(names){
   try{
+    if(viaGas()){
+      var g = await gas({action:'read', sheets:names});
+      names.forEach(function(n){ DB[n] = parseRows({values: g.values[n] || []}, n); });
+      return {};
+    }
     var qs = names.map(function(n){ return 'ranges='+A1(n, sheetRange(n)); }).join('&');
     var got = await api(SS+ssId+'/values:batchGet?'+qs);
     (got.valueRanges||[]).forEach(function(r, i){ DB[names[i]] = parseRows(r, names[i]); });
@@ -1931,6 +1957,56 @@ async function addPerson(){
   toast(v + ' を足しました');
   await loadAll(); renderAll();
 }
+/* 書き込み役の設定。ここが入っていれば、記入する人はシートの権限を持たなくていい。 */
+function gasBox(){
+  var on = viaGas();
+  return '<div style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line)">'+
+    '<b style="font-family:\'Zen Kaku Gothic New\',sans-serif;font-size:.9rem">書き込み役</b>'+
+    (on ? ' <span class="pill p-ok">使っています</span>' : ' <span class="pill p-warn">使っていません</span>')+
+    '<p style="margin:6px 0 12px;color:var(--sub);font-size:.84rem">'+
+    (on
+      ? 'スプレッドシートに書くのは、この仕組みが代わりにやっています。'+
+        '記入する人はスプレッドシートの権限を持たなくて済むので、シートは総務経理のドライブに置けます。'
+      : 'いまは記入する人が自分でスプレッドシートに書いています。'+
+        'そのため全員にシートの編集権限が要り、シートを直接開けてしまいます。'+
+        'Apps Script を1つ置くと、この仕組みが代わりに書くようになります。置き方は README を見てください。')+
+    '</p>'+
+    '<div class="toolbar"><input type="text" id="gas-url" placeholder="https://script.google.com/.../exec" '+
+      'value="'+esc((orgConfig && orgConfig.apiUrl) || '')+'" style="min-width:320px">'+
+      '<button class="btn sm" id="btn-gas-save">つなぐ</button>'+
+      (on ? '<button class="btn ghost sm" id="btn-gas-off">やめる</button>' : '')+'</div></div>';
+}
+function wireGasBox(){
+  var b = $('btn-gas-save');
+  if(b) b.onclick = async function(){
+    var url = $('gas-url').value.trim();
+    if(!/^https:\/\/script\.google\.com\/.*\/exec$/.test(url)){
+      toast('Apps Script の /exec で終わるURLを貼ってください', true); return;
+    }
+    this.disabled = true; this.textContent = '確かめています…';
+    var keep = orgConfig.apiUrl;
+    try{
+      orgConfig.apiUrl = url;
+      var r = await gas({action:'ping'});
+      if(!r.ok) throw new Error('返事がおかしいです');
+      await saveConfig();
+      toast('書き込み役につながりました（'+r.email+'／'+r.role+'）');
+      renderAll();
+    }catch(e){
+      orgConfig.apiUrl = keep;
+      toast('つながりませんでした：'+e.message, true);
+      this.disabled = false; this.textContent = 'つなぐ';
+    }
+  };
+  var o = $('btn-gas-off');
+  if(o) o.onclick = async function(){
+    if(!confirm('書き込み役をやめると、記入する人ひとりひとりにシートの編集権限が要ります。よろしいですか。')) return;
+    delete orgConfig.apiUrl;
+    await saveConfig();
+    toast('書き込み役をやめました');
+    renderAll();
+  };
+}
 function renderSettings(){
   renderAdmins();
   var hasAcc = DB['人'].some(function(u){ return u['ロール']==='acc'; }) || (orgConfig && (orgConfig.admins||[]).length);
@@ -1944,7 +2020,9 @@ function renderSettings(){
     '<dt>証憑フォルダ</dt><dd>'+(driveRoot ? '<a href="https://drive.google.com/drive/folders/'+esc(driveRoot)+'" target="_blank" rel="noopener">開く</a>' : '—')+'</dd>'+
     '</dl>'+
     '<div class="actions"><button class="btn ghost" id="btn-reconnect">つなぎ直す</button>'+
-    '<span class="hint">ほかのスプレッドシートに切り替えます。中身は消えません。</span></div>';
+    '<span class="hint">ほかのスプレッドシートに切り替えます。中身は消えません。</span></div>'+
+    (isAdmin(me.email) ? gasBox() : '');
+  wireGasBox();
   $('btn-reconnect').onclick = function(){
     if(!confirm('つなぎ先を選び直します。データは消えません。')) return;
     localStorage.removeItem('cb_ss_id'); localStorage.removeItem('cb_drive_id'); location.reload();
