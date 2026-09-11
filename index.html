@@ -554,11 +554,13 @@ var DOMAIN = localStorage.getItem('cb_domain') || 'm2-labo.jp';
 var SS_TITLE = 'Choreia 予算 データ';
 var TAX = 0.1;
 
+var SCHEMA_VERSION = 2;
 var SHEETS = {
-  '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','項目','品名','購入理由','購入先',
-           '税抜','税込','支払方法','立替区分','事業','検収日','支払日','返金日','備考','証憑フォルダ',
-           '見積書','発注書','納品書','請求書','領収書','チェック者','チェック日時','社長承認者','社長承認日時',
-           '差戻理由','更新日時','更新者'],
+  '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
+           'インボイスNo','税抜','税込','納品先','支払方法','立替区分','事業','検収日','納品予定日',
+           '支払期限','支払日','返金日','原本郵送','備考','証憑フォルダ',
+           '見積書','発注書','納品書','請求書','領収書','振込証憑','その他',
+           'チェック者','チェック日時','社長承認者','社長承認日時','差戻理由','更新日時','更新者'],
   '入金': ['id','記入日時','記入者','部門','種別','項目','証憑','税込','税抜','振込期日','入金確認日','確認者','売掛入力','備考'],
   'マスタ': ['リスト','値','有効','並び','使用回数','最終使用'],
   '人': ['メール','名前','ロール','部門','上長メール'],
@@ -761,12 +763,16 @@ function colLetter(n){
   return s;
 }
 function sheetRange(name, rows){
-  return 'A1:' + colLetter(SHEETS[name].length) + (rows || 5000);
+  var n = Math.max(SHEETS[name].length, (HEAD[name]||[]).length);
+  return 'A1:' + colLetter(n) + (rows || 5000);
 }
-function parseRows(r){
+/* シートの実際の見出し行。定数の並びと違っていても、必ずシート側に合わせて書く。 */
+var HEAD = {};
+function parseRows(r, name){
   var rows = r && r.values || [];
   if(rows.length < 1) return [];
   var head = rows[0], out=[];
+  if(name && head.length) HEAD[name] = head.slice();
   for(var i=1;i<rows.length;i++){
     if(!rows[i] || !rows[i].join('')) continue;
     var o = {_row:i+1};
@@ -779,18 +785,12 @@ async function readSheet(name){
   var r;
   try{ r = await api(SS+ssId+'/values/'+A1(name, sheetRange(name))); }
   catch(e){ return []; }
-  var rows = r.values || [];
-  if(rows.length < 1) return [];
-  var head = rows[0], out=[];
-  for(var i=1;i<rows.length;i++){
-    if(!rows[i] || !rows[i].join('')) continue;
-    var o = {_row:i+1};
-    for(var j=0;j<head.length;j++) o[head[j]] = rows[i][j]!==undefined ? rows[i][j] : '';
-    out.push(o);
-  }
-  return out;
+  return parseRows(r, name);
 }
-function toArr(name, obj){ return SHEETS[name].map(function(h){ return obj[h]!==undefined && obj[h]!==null ? String(obj[h]) : ''; }); }
+function toArr(name, obj){
+  var head = HEAD[name] && HEAD[name].length ? HEAD[name] : SHEETS[name];
+  return head.map(function(h){ return obj[h]!==undefined && obj[h]!==null ? String(obj[h]) : ''; });
+}
 async function appendRow(name, obj){
   await api(SS+ssId+'/values/'+A1(name,'A1')+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',
     {method:'POST', body: JSON.stringify({values:[toArr(name,obj)]})});
@@ -834,7 +834,21 @@ async function ensureTabs(){
   var data = [];
   names.forEach(function(n, i){
     var v = (ranges[i]||{}).values;
-    if(!v || !v.length || !(v[0]||[]).join('')) data.push({range: n+'!A1', values:[SHEETS[n]]});
+    var cur = (v && v[0]) ? v[0].filter(function(x){ return String(x||'').trim(); }) : [];
+    if(!cur.length){
+      data.push({range: n+'!A1', values:[SHEETS[n]]});
+      HEAD[n] = SHEETS[n].slice();
+    } else {
+      // 足りない列はうしろに継ぎ足す。並び替えはしないので既存データは動かない。
+      var add = SHEETS[n].filter(function(h){ return cur.indexOf(h) < 0; });
+      if(add.length){
+        var merged = cur.concat(add);
+        data.push({range: n+'!A1', values:[merged]});
+        HEAD[n] = merged;
+      } else {
+        HEAD[n] = cur;
+      }
+    }
   });
   if(data.length){
     await api(SS+ssId+'/values:batchUpdate', {method:'POST',
@@ -882,9 +896,9 @@ async function ensureDriveRoot(){
   localStorage.setItem('cb_drive_id', driveRoot);
 }
 async function boot(){
-  var readyKey = 'cb_ready_' + ssId;
+  var readyKey = 'cb_ready_' + SCHEMA_VERSION + '_' + ssId;
   try{
-    // 初回だけ。タブと見出しの用意はそのあと毎回やる必要がない。
+    // 列が増えたときだけ走る。ふだんは丸ごと飛ばす。
     if(localStorage.getItem(readyKey) !== '1'){
       busy('はじめの準備をしています…');
       await ensureTabs();
@@ -896,6 +910,11 @@ async function boot(){
     var small = await loadSome(['マスタ','人']);
     if(small.err) throw small.err;
     await ensureMe();
+    // 設定ファイルがまだ無ければ、経理の人が作る（2人目からは設定なしでつながる）
+    if(!orgConfig && me.role === 'acc'){
+      if(!driveRoot){ try{ await ensureDriveRoot(); }catch(e){} }
+      try{ await writeFirstConfig(); }catch(e){}
+    }
     $('setup').hidden = true;
     $('appmain').hidden = false;
     busy(false);
@@ -918,7 +937,7 @@ async function loadSome(names){
   try{
     var qs = names.map(function(n){ return 'ranges='+A1(n, sheetRange(n)); }).join('&');
     var got = await api(SS+ssId+'/values:batchGet?'+qs);
-    (got.valueRanges||[]).forEach(function(r, i){ DB[names[i]] = parseRows(r); });
+    (got.valueRanges||[]).forEach(function(r, i){ DB[names[i]] = parseRows(r, names[i]); });
     return {};
   }catch(e){ return {err:e}; }
 }
@@ -1678,6 +1697,28 @@ function renderMaster(){
 /* ==================== 設定 ==================== */
 var ROLE_NAME = {user:'一般ユーザ', mgr:'課長', acc:'経理', pres:'社長'};
 function renderAdmins(){
+  if(!orgConfig || !orgConfig.spreadsheetId){
+    $('admin-box').innerHTML =
+      '<div class="err">会社の設定ファイルがまだありません。'+
+      'いまはこの端末の中だけでつながっています。ほかの人がログインしても、同じシートにはつながりません。</div>'+
+      '<p style="margin:0 0 12px;color:var(--sub);font-size:.85rem">'+
+      'ボタンを押すと、Googleドライブに <span class="mono">choreia-budget-config.json</span> を置きます。'+
+      'ほかの人はログインするだけで、このシートにつながるようになります。</p>'+
+      '<div class="actions"><button class="btn" id="btn-mkcfg">全員で使えるようにする</button></div>';
+    $('btn-mkcfg').onclick = async function(){
+      this.disabled = true; this.textContent = '作っています…';
+      try{
+        if(!driveRoot) await ensureDriveRoot();
+        await writeFirstConfig();
+        toast('設定ファイルを作りました');
+        renderAll();
+      }catch(e){
+        toast('作れませんでした：'+e.message, true);
+        this.disabled = false; this.textContent = '全員で使えるようにする';
+      }
+    };
+    return;
+  }
   var list = (orgConfig && (orgConfig.admins || (orgConfig.admin ? [orgConfig.admin] : []))) || [];
   var owner = orgConfig && (orgConfig.admin || list[0]);
   var can = isAdmin(me.email);
