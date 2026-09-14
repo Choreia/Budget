@@ -591,7 +591,7 @@ var DOMAIN = localStorage.getItem('cb_domain') || 'm2-labo.jp';
 var SS_TITLE = 'Choreia 予算 データ';
 var TAX = 0.1;
 
-var BUILD = '2026-09-14 v10';
+var BUILD = '2026-09-14 v12';
 var SCHEMA_VERSION = 2;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -970,10 +970,11 @@ async function ensureMe(){
 async function ensureDriveRoot(){
   if(driveRoot) return;
   var q = encodeURIComponent("name='Choreia 予算 証憑' and mimeType='application/vnd.google-apps.folder' and trashed=false");
-  var s = await api('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name)');
+  var s = await api('https://www.googleapis.com/drive/v3/files?q='+q+
+    '&corpora=allDrives&includeItemsFromAllDrives=true&supportsAllDrives=true&fields=files(id,name)');
   if(s.files && s.files.length){ driveRoot = s.files[0].id; }
   else {
-    var f = await api('https://www.googleapis.com/drive/v3/files',
+    var f = await api('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true',
       {method:'POST', body: JSON.stringify({name:'Choreia 予算 証憑', mimeType:'application/vnd.google-apps.folder'})});
     driveRoot = f.id;
   }
@@ -1202,8 +1203,18 @@ function guessType(name){
 }
 async function createFolder(name){
   if(!driveRoot) await ensureDriveRoot();
-  var f = await api('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink',
-    {method:'POST', body: JSON.stringify({name:name, mimeType:'application/vnd.google-apps.folder', parents:[driveRoot]})});
+  var body = {name:name, mimeType:'application/vnd.google-apps.folder', parents:[driveRoot]};
+  var url = 'https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id,webViewLink';
+  var f;
+  try{
+    f = await api(url, {method:'POST', body: JSON.stringify(body)});
+  }catch(e){
+    // 決められたフォルダが使えないとき（共有されていないなど）は、自分のドライブに作る。
+    // 証憑の置き場所のせいで記入そのものが止まらないようにする。
+    delete body.parents;
+    f = await api(url, {method:'POST', body: JSON.stringify(body)});
+    toast('証憑フォルダが使えないので、あなたのドライブに作りました。経理に共有を依頼してください。', true);
+  }
   await shareInDomain(f.id);
   return f;
 }
@@ -1211,7 +1222,7 @@ async function createFolder(name){
 async function shareInDomain(fileId){
   if(!DOMAIN) return;
   try{
-    await api('https://www.googleapis.com/drive/v3/files/'+fileId+'/permissions?sendNotificationEmail=false',
+    await api('https://www.googleapis.com/drive/v3/files/'+fileId+'/permissions?sendNotificationEmail=false&supportsAllDrives=true',
       {method:'POST', body: JSON.stringify({type:'domain', role:'writer', domain:DOMAIN})});
   }catch(e){ /* 個人アカウントや組織の制限。リンクは残るので手動共有で足りる */ }
 }
@@ -1222,7 +1233,7 @@ async function uploadTo(folderId, file){
              '\r\n--'+boundary+'\r\nContent-Type: '+(file.type||'application/octet-stream')+'\r\n\r\n';
   var tail = '\r\n--'+boundary+'--';
   var blob = new Blob([head, file, tail], {type:'multipart/related; boundary='+boundary});
-  var res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
+  var res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id',
     {method:'POST', headers:{'Authorization':'Bearer '+accessToken}, body: blob});
   if(!res.ok) throw new Error('アップロードに失敗しました');
   return res.json();
