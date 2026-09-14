@@ -372,13 +372,14 @@
             </div>
             <div class="row2">
               <div class="field">
-                <label for="f-net">金額（税抜）<span class="req">必須</span></label>
-                <input type="text" id="f-net" class="mono" inputmode="numeric" placeholder="0">
+                <label for="f-gross">金額（税込）<span class="req">必須</span></label>
+                <input type="text" id="f-gross" class="mono" inputmode="numeric" placeholder="0">
+                <div class="hint">請求書や領収書に出ている金額です。</div>
               </div>
               <div class="field">
-                <label for="f-gross">金額（税込）</label>
-                <input type="text" id="f-gross" class="mono" inputmode="numeric" placeholder="0">
-                <div class="hint">10%で自動計算。上書きもできます。</div>
+                <label for="f-net">金額（税抜）</label>
+                <input type="text" id="f-net" class="mono" inputmode="numeric" placeholder="0">
+                <div class="hint">10%で自動計算。違うときは直してください。</div>
               </div>
             </div>
             <div class="field">
@@ -902,9 +903,11 @@ async function ensureTabs(){
   var got = await api(SS+ssId+'/values:batchGet?'+qs);
   var ranges = got.valueRanges || [];
   var data = [];
+  var conflicts = [];
   names.forEach(function(n, i){
     var v = (ranges[i]||{}).values;
     var cur = (v && v[0]) ? v[0].filter(function(x){ return String(x||'').trim(); }) : [];
+    if(cur.length && cur[0] !== SHEETS[n][0]){ conflicts.push(n); return; }
     if(!cur.length){
       data.push({range: n+'!A1', values:[SHEETS[n]]});
       HEAD[n] = SHEETS[n].slice();
@@ -920,6 +923,11 @@ async function ensureTabs(){
       }
     }
   });
+  if(conflicts.length){
+    throw new Error('このスプレッドシートには、同じ名前で別の用途に使われているタブがあります（'+
+      conflicts.join('、')+'）。中身を壊さないよう、何もしていません。'+
+      'このアプリ専用のスプレッドシートを新しく作って、そちらにつないでください。');
+  }
   if(data.length){
     await api(SS+ssId+'/values:batchUpdate', {method:'POST',
       body: JSON.stringify({valueInputOption:'RAW', data:data})});
@@ -1242,7 +1250,7 @@ async function submitEntry(asDraft){
   var net = num($('f-net').value), gross = num($('f-gross').value);
   if(!name) err.push('品名');
   if(!why) err.push('購入理由');
-  if(!net && !gross) err.push('金額');
+  if(!gross) err.push('金額（税込）');
   if(!form.dept) err.push('費用負担部門');
   if(err.length && !asDraft){
     $('form-err').innerHTML = '<div class="err">'+esc(err.join('・'))+' が空です。埋めてから出してください。</div>';

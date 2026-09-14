@@ -20,6 +20,11 @@
 /* このドメインの人だけ使えます。空にすると誰でも使えてしまうので必ず入れてください。 */
 var ALLOWED_DOMAIN = 'm2-labo.jp';
 
+/* 読み書きするスプレッドシート。
+   空なら、このスクリプトが貼り付けられているスプレッドシートを使います。
+   別のスプレッドシートに移すときは、ここにIDを入れてデプロイし直してください。 */
+var SPREADSHEET_ID = '';
+
 /* 設定ファイルを読めないときの保険。ここに書いた人は必ず管理者です。 */
 var FALLBACK_ADMINS = ['r.yasukouchi@m2-labo.jp'];
 
@@ -124,8 +129,11 @@ function trim(s) { return String(s).trim(); }
 function nonEmpty(s) { return !!s; }
 
 /* ==================== シートの読み書き ==================== */
+function book() {
+  return SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID) : SpreadsheetApp.getActive();
+}
 function sheetOf(name) {
-  var ss = SpreadsheetApp.getActive();
+  var ss = book();
   var sh = ss.getSheetByName(name);
   if (!sh) {
     sh = ss.insertSheet(name);
@@ -174,13 +182,25 @@ function appendRaw(name, obj) {
 }
 
 /* ==================== 操作 ==================== */
+/* 同じ名前の別物のタブに書き込まないための確認。
+   もともと別の用途で使われているタブを、このアプリが上書きしてしまわないようにします。 */
+function looksLikeOurs(name, head) {
+  return head.length > 0 && head[0] === SHEETS[name][0];
+}
 function doEnsure(me) {
   // 誰が呼んでも通します。足りない列を足して、マスタが空なら初期値を入れるだけで、
   // 既にあるデータには触りません。ここで止めると、新しく入った人がアプリを開けなくなります。
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
+    var conflicts = [];
     for (var name in SHEETS) {
+      var ss = book();
+      var exists = ss.getSheetByName(name);
+      if (exists && exists.getLastRow() > 0) {
+        var h0 = headOf(name);
+        if (!looksLikeOurs(name, h0)) { conflicts.push(name); continue; }
+      }
       var sh = sheetOf(name);
       var head = headOf(name);
       var add = SHEETS[name].filter(function (h) { return head.indexOf(h) < 0; });
@@ -188,6 +208,11 @@ function doEnsure(me) {
         var merged = head.concat(add);
         sh.getRange(1, 1, 1, merged.length).setValues([merged]);
       }
+    }
+    if (conflicts.length) {
+      return { error: 'このスプレッドシートには、同じ名前で別の用途に使われているタブがあります（' +
+        conflicts.join('、') + '）。中身を壊さないよう、何もしていません。' +
+        'このアプリ専用のスプレッドシートを新しく作って、そちらにつないでください。' };
     }
     // マスタが空なら初期値を入れる
     var m = sheetOf('マスタ');
