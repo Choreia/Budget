@@ -591,7 +591,7 @@ var DOMAIN = localStorage.getItem('cb_domain') || 'm2-labo.jp';
 var SS_TITLE = 'Choreia 予算 データ';
 var TAX = 0.1;
 
-var BUILD = '2026-09-14 v9';
+var BUILD = '2026-09-14 v10';
 var SCHEMA_VERSION = 2;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -715,10 +715,7 @@ function cacheConfig(){
   try{ localStorage.setItem(CONFIG_CACHE, JSON.stringify(orgConfig)); }catch(e){}
 }
 async function findConfig(){
-  try{
-    var c = JSON.parse(localStorage.getItem(CONFIG_CACHE) || 'null');
-    if(c && c.spreadsheetId && c.domain === me.domain){ orgConfig = c; return c; }
-  }catch(e){}
+  // 覚えているものを先に使わない。古い設定のまま書き込んでしまうため、毎回ドライブから読む。
   var q = encodeURIComponent("name='"+CONFIG_FILENAME+"' and trashed=false");
   var d = await api('https://www.googleapis.com/drive/v3/files?q='+q+
     '&corpora=allDrives&includeItemsFromAllDrives=true&supportsAllDrives=true&fields=files(id,name)');
@@ -732,6 +729,11 @@ async function findConfig(){
       }
     }catch(e){}
   }
+  // ドライブが読めなかったときだけ、覚えているものを使う
+  try{
+    var c = JSON.parse(localStorage.getItem(CONFIG_CACHE) || 'null');
+    if(c && c.spreadsheetId && c.domain === me.domain){ orgConfig = c; return c; }
+  }catch(e){}
   return null;
 }
 async function saveConfig(){
@@ -987,6 +989,17 @@ async function boot(){
       catch(e){
         // 準備に失敗しても読み込みは続ける。ここで止めると画面が出ない。
         setTimeout(function(){ toast('準備の一部ができませんでした：'+e.message, true); }, 1200);
+      }
+    }
+    // 書き込み役が別のシートを見ていないか、毎回確かめる
+    if(viaGas()){
+      busy('つなぎ先を確かめています…');
+      var pong = await gas({action:'ping'});
+      if(!pong.spreadsheetId || pong.spreadsheetId !== orgConfig.spreadsheetId){
+        throw new Error('書き込み役が別のスプレッドシートを見ています（'+
+          (pong.spreadsheetName || pong.spreadsheetId || '不明')+'）。'+
+          'このままだと違うシートに書いてしまうので、止めました。'+
+          '設定タブで書き込み役をつなぎ直してください。');
       }
     }
     // まず小さいものだけ読んで画面を出す
