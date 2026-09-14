@@ -589,6 +589,7 @@ var DOMAIN = localStorage.getItem('cb_domain') || 'm2-labo.jp';
 var SS_TITLE = 'Choreia 予算 データ';
 var TAX = 0.1;
 
+var BUILD = '2026-09-14 v5';
 var SCHEMA_VERSION = 2;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -2040,6 +2041,7 @@ function renderSettings(){
     '<dt>スプレッドシート</dt><dd><a href="https://docs.google.com/spreadsheets/d/'+esc(ssId)+'/edit" target="_blank" rel="noopener">開く</a>'+
       '　<span class="mono" style="color:var(--muted);font-size:.85em">'+esc(ssId)+'</span></dd>'+
     '<dt>証憑フォルダ</dt><dd>'+(driveRoot ? '<a href="https://drive.google.com/drive/folders/'+esc(driveRoot)+'" target="_blank" rel="noopener">開く</a>' : '—')+'</dd>'+
+    '<dt>この画面の版</dt><dd class="mono">'+esc(BUILD)+'</dd>'+
     '</dl>'+
     (isAdmin(me.email)
       ? '<div class="field" style="margin-top:6px"><label for="ss-move">スプレッドシートを変える</label>'+
