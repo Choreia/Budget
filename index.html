@@ -549,6 +549,8 @@
           <select id="ms-list"></select>
           <input type="text" id="ms-new" placeholder="足したい選択肢">
           <button class="btn sm" id="btn-ms-add">足す</button>
+          <span class="spacer"></span>
+          <button class="btn ghost sm" id="btn-ms-seed">初期値を入れ直す</button>
         </div>
         <div id="master-list"><div class="loading">読み込み中…</div></div>
       </section>
@@ -589,7 +591,7 @@ var DOMAIN = localStorage.getItem('cb_domain') || 'm2-labo.jp';
 var SS_TITLE = 'Choreia 予算 データ';
 var TAX = 0.1;
 
-var BUILD = '2026-09-14 v7';
+var BUILD = '2026-09-14 v8';
 var SCHEMA_VERSION = 2;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -981,11 +983,8 @@ async function boot(){
     // 列が増えたときだけ走る。ふだんは丸ごと飛ばす。
     if(localStorage.getItem(readyKey) !== '1'){
       busy('はじめの準備をしています…');
-      try{
-        if(viaGas()){ await gas({action:'ensure'}); }
-        else { await ensureTabs(); await seedMasters(); }
-        localStorage.setItem(readyKey, '1');
-      }catch(e){
+      try{ await prepare(); localStorage.setItem(readyKey, '1'); }
+      catch(e){
         // 準備に失敗しても読み込みは続ける。ここで止めると画面が出ない。
         setTimeout(function(){ toast('準備の一部ができませんでした：'+e.message, true); }, 1200);
       }
@@ -994,6 +993,12 @@ async function boot(){
     busy('読み込んでいます…');
     var small = await loadSome(['マスタ','人']);
     if(small.err) throw small.err;
+    // 選択肢が空なら、用意が済んでいないということ。もう一度だけやり直す。
+    if(!(DB['マスタ']||[]).length){
+      busy('選択肢を入れています…');
+      try{ await prepare(); await loadSome(['マスタ','人']); }
+      catch(e){ setTimeout(function(){ toast('選択肢を入れられませんでした：'+e.message, true); }, 1200); }
+    }
     await ensureMe();
     // 設定ファイルがまだ無ければ、経理の人が作る（2人目からは設定なしでつながる）
     if(!orgConfig && me.role === 'acc'){
@@ -1019,6 +1024,16 @@ async function boot(){
       (viaGas() ? '　書き込み役：使用中' : '　書き込み役：なし')+'</div></div>');
   }
 }
+/* タブと見出しの用意。書き込み役があればそちら、なければ直接。 */
+async function prepare(){
+  if(viaGas()){
+    var r = await gas({action:'ensure'});
+    if(r && r.error) throw new Error(r.error);
+  } else {
+    await ensureTabs(); await seedMasters();
+  }
+}
+
 /* 必要なシートだけ、1回のリクエストでまとめて読む */
 async function loadSome(names){
   try{
@@ -2278,6 +2293,16 @@ function wire(){
   $('cost-dept').addEventListener('change', renderCost);
   $('ms-list').addEventListener('change', renderMaster);
   $('btn-ms-add').onclick = addMaster;
+  $('btn-ms-seed').onclick = async function(){
+    this.disabled = true; this.textContent = '入れています…';
+    try{
+      await prepare();
+      await loadAll();
+      renderAll();
+      toast('選択肢を入れました');
+    }catch(e){ toast('入れられませんでした：'+e.message, true); }
+    this.disabled = false; this.textContent = '初期値を入れ直す';
+  };
   $('btn-income-new').onclick = addIncome;
   $('btn-income-csv').onclick = function(){
     csv([SHEETS['入金']].concat(DB['入金'].map(function(r){ return SHEETS['入金'].map(function(h){ return r[h]; }); })), '入金予定.csv');
