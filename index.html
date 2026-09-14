@@ -589,7 +589,7 @@ var DOMAIN = localStorage.getItem('cb_domain') || 'm2-labo.jp';
 var SS_TITLE = 'Choreia 予算 データ';
 var TAX = 0.1;
 
-var BUILD = '2026-09-14 v5';
+var BUILD = '2026-09-14 v6';
 var SCHEMA_VERSION = 2;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -2007,7 +2007,12 @@ function wireGasBox(){
       orgConfig.apiUrl = url;
       var r = await gas({action:'ping'});
       if(!r.ok) throw new Error('返事がおかしいです');
-      if(r.spreadsheetId && r.spreadsheetId !== orgConfig.spreadsheetId){
+      if(!r.spreadsheetId){
+        orgConfig.apiUrl = keep;
+        throw new Error('この書き込み役は古い版です。どのスプレッドシートに書くのか答えられないので、つなぎません。'+
+          'apps-script のコードを貼り直して、新しいバージョンでデプロイしてください。');
+      }
+      if(r.spreadsheetId !== orgConfig.spreadsheetId){
         orgConfig.apiUrl = keep;
         throw new Error('書き込み役が別のスプレッドシートを見ています（'+(r.spreadsheetName||r.spreadsheetId)+'）。'+
           'Apps Script の SPREADSHEET_ID を、いまつないでいるシートのIDに変えてデプロイし直してください。');
