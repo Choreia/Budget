@@ -591,7 +591,7 @@ var DOMAIN = localStorage.getItem('cb_domain') || 'm2-labo.jp';
 var SS_TITLE = 'Choreia 予算 データ';
 var TAX = 0.1;
 
-var BUILD = '2026-09-14 v8';
+var BUILD = '2026-09-14 v9';
 var SCHEMA_VERSION = 2;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -994,10 +994,16 @@ async function boot(){
     var small = await loadSome(['マスタ','人']);
     if(small.err) throw small.err;
     // 選択肢が空なら、用意が済んでいないということ。もう一度だけやり直す。
-    if(!(DB['マスタ']||[]).length){
+    if(!(DB['マスタ']||[]).length && me.role === 'acc'){
       busy('選択肢を入れています…');
-      try{ await prepare(); await loadSome(['マスタ','人']); }
-      catch(e){ setTimeout(function(){ toast('選択肢を入れられませんでした：'+e.message, true); }, 1200); }
+      try{
+        await prepare();
+        await loadSome(['マスタ','人']);
+        if(!(DB['マスタ']||[]).length){
+          await seedFromApp(function(d,t){ busy('選択肢を入れています… '+d+'/'+t); });
+          await loadSome(['マスタ','人']);
+        }
+      }catch(e){ setTimeout(function(){ toast('選択肢を入れられませんでした：'+e.message, true); }, 1200); }
     }
     await ensureMe();
     // 設定ファイルがまだ無ければ、経理の人が作る（2人目からは設定なしでつながる）
@@ -1024,6 +1030,23 @@ async function boot(){
       (viaGas() ? '　書き込み役：使用中' : '　書き込み役：なし')+'</div></div>');
   }
 }
+/* 選択肢をアプリから直接入れる。書き込み役の用意処理に頼らない確実な道。 */
+async function seedFromApp(onProgress){
+  var rows = [], i = 0;
+  for(var list in SEED){
+    SEED[list].forEach(function(v){
+      rows.push({'リスト':list, '値':v, '有効':'TRUE', '並び':String(++i), '使用回数':'0', '最終使用':''});
+    });
+  }
+  var done = 0;
+  for(var k=0; k<rows.length; k++){
+    await appendRow('マスタ', rows[k]);
+    done++;
+    if(onProgress) onProgress(done, rows.length);
+  }
+  return done;
+}
+
 /* タブと見出しの用意。書き込み役があればそちら、なければ直接。 */
 async function prepare(){
   if(viaGas()){
@@ -2295,11 +2318,12 @@ function wire(){
   $('btn-ms-add').onclick = addMaster;
   $('btn-ms-seed').onclick = async function(){
     this.disabled = true; this.textContent = '入れています…';
+    var self = this;
     try{
-      await prepare();
+      var n = await seedFromApp(function(d,t){ self.textContent = '入れています… '+d+'/'+t; });
       await loadAll();
       renderAll();
-      toast('選択肢を入れました');
+      toast(n+'件の選択肢を入れました');
     }catch(e){ toast('入れられませんでした：'+e.message, true); }
     this.disabled = false; this.textContent = '初期値を入れ直す';
   };
