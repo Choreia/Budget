@@ -589,7 +589,7 @@ var DOMAIN = localStorage.getItem('cb_domain') || 'm2-labo.jp';
 var SS_TITLE = 'Choreia 予算 データ';
 var TAX = 0.1;
 
-var BUILD = '2026-09-14 v6';
+var BUILD = '2026-09-14 v7';
 var SCHEMA_VERSION = 2;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -2018,6 +2018,11 @@ function wireGasBox(){
           'Apps Script の SPREADSHEET_ID を、いまつないでいるシートのIDに変えてデプロイし直してください。');
       }
       await saveConfig();
+      // つないだ先の用意をその場で済ませる（読み直しを待たせない）
+      try{
+        await gas({action:'ensure'});
+        await loadAll();
+      }catch(e2){ toast('用意の一部ができませんでした：'+e2.message, true); }
       toast('書き込み役につながりました（'+r.email+'／'+r.role+'）');
       renderAll();
     }catch(e){
