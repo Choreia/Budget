@@ -2006,6 +2006,11 @@ function wireGasBox(){
       orgConfig.apiUrl = url;
       var r = await gas({action:'ping'});
       if(!r.ok) throw new Error('返事がおかしいです');
+      if(r.spreadsheetId && r.spreadsheetId !== orgConfig.spreadsheetId){
+        orgConfig.apiUrl = keep;
+        throw new Error('書き込み役が別のスプレッドシートを見ています（'+(r.spreadsheetName||r.spreadsheetId)+'）。'+
+          'Apps Script の SPREADSHEET_ID を、いまつないでいるシートのIDに変えてデプロイし直してください。');
+      }
       await saveConfig();
       toast('書き込み役につながりました（'+r.email+'／'+r.role+'）');
       renderAll();
@@ -2036,9 +2041,32 @@ function renderSettings(){
       '　<span class="mono" style="color:var(--muted);font-size:.85em">'+esc(ssId)+'</span></dd>'+
     '<dt>証憑フォルダ</dt><dd>'+(driveRoot ? '<a href="https://drive.google.com/drive/folders/'+esc(driveRoot)+'" target="_blank" rel="noopener">開く</a>' : '—')+'</dd>'+
     '</dl>'+
-    '<div class="actions"><button class="btn ghost" id="btn-reconnect">つなぎ直す</button>'+
-    '<span class="hint">ほかのスプレッドシートに切り替えます。中身は消えません。</span></div>'+
+    (isAdmin(me.email)
+      ? '<div class="field" style="margin-top:6px"><label for="ss-move">スプレッドシートを変える</label>'+
+        '<input type="text" id="ss-move" placeholder="新しいスプレッドシートのURLを貼る">'+
+        '<div class="hint">全員の向き先が変わります。いまの中身は移りません。'+
+        '書き込み役を使っているときは、あちらの SPREADSHEET_ID も同じIDに変えてください。</div>'+
+        '<div class="actions"><button class="btn ghost" id="btn-ss-move">切り替える</button></div></div>'
+      : '')+
     (isAdmin(me.email) ? gasBox() : '');
+  var mv = $('btn-ss-move');
+  if(mv) mv.onclick = async function(){
+    var id = idFromUrl($('ss-move').value);
+    if(!id || id.length < 20){ toast('スプレッドシートのURLを貼ってください', true); return; }
+    if(!confirm('つなぎ先を切り替えます。全員に効きます。よろしいですか。')) return;
+    this.disabled = true; this.textContent = '切り替えています…';
+    try{
+      orgConfig.spreadsheetId = id;
+      await saveConfig();
+      localStorage.setItem('cb_ss_id', id);
+      Object.keys(localStorage).forEach(function(k){ if(k.indexOf('cb_ready_')===0) localStorage.removeItem(k); });
+      toast('切り替えました。読み直します。');
+      setTimeout(function(){ location.reload(); }, 900);
+    }catch(e){
+      toast('切り替えられませんでした：'+e.message, true);
+      this.disabled = false; this.textContent = '切り替える';
+    }
+  };
   wireGasBox();
   $('btn-reconnect').onclick = function(){
     if(!confirm('つなぎ先を選び直します。データは消えません。')) return;

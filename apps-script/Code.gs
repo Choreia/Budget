@@ -59,7 +59,8 @@ function doPost(e) {
 
     var me = lookupPerson(email);
     switch (req.action) {
-      case 'ping':   return json({ ok: true, email: email, role: me.role, depts: me.depts });
+      case 'ping':   return json({ ok: true, email: email, role: me.role, depts: me.depts,
+                                  spreadsheetId: book().getId(), spreadsheetName: book().getName() });
       case 'ensure': return json(doEnsure(me));
       case 'read':   return json(doRead(me, req.sheets));
       case 'append': return json(doAppend(me, req.sheet, req.row));
