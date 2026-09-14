@@ -2068,10 +2068,6 @@ function renderSettings(){
     }
   };
   wireGasBox();
-  $('btn-reconnect').onclick = function(){
-    if(!confirm('つなぎ先を選び直します。データは消えません。')) return;
-    localStorage.removeItem('cb_ss_id'); localStorage.removeItem('cb_drive_id'); location.reload();
-  };
 
   $('users-box').innerHTML =
     (!hasAcc ? '<div class="err">経理ロールの人がまだいません。いまは誰でもロールを変えられます。'+

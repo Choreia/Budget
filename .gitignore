@@ -7,3 +7,4 @@
 .env*
 !.env.example
 apps-script/貼り付け用.gs
+apps-script/paste-ready.gs
