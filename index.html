@@ -887,7 +887,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-15 v22';
+var BUILD = '2026-09-15 v23';
 var SCHEMA_VERSION = 3;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -2407,23 +2407,32 @@ async function addPerson(){
 }
 /* 書き込み役の設定。ここが入っていれば、記入する人はシートの権限を持たなくていい。 */
 function gasBox(){
-  var on = viaGas();
+  var on = viaGas(), en = isEn();
   return '<div style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line)">'+
-    '<b style="font-family:\'Zen Kaku Gothic New\',sans-serif;font-size:.9rem">書き込み役</b>'+
-    (on ? ' <span class="pill p-ok">使っています</span>' : ' <span class="pill p-warn">使っていません</span>')+
+    '<b style="font-family:\'Zen Kaku Gothic New\',sans-serif;font-size:.9rem">'+
+      (en?'Writer service':'書き込み役')+'</b>'+
+    (on ? ' <span class="pill p-ok">'+(en?'In use':'使っています')+'</span>'
+        : ' <span class="pill p-warn">'+(en?'Not in use':'使っていません')+'</span>')+
     '<p style="margin:6px 0 12px;color:var(--sub);font-size:.84rem">'+
     (on
-      ? 'スプレッドシートに書くのは、この仕組みが代わりにやっています。'+
-        '記入する人はスプレッドシートの権限を持たなくて済むので、シートは総務経理のドライブに置けます。'
-      : 'いまは記入する人が自分でスプレッドシートに書いています。'+
-        'そのため全員にシートの編集権限が要り、シートを直接開けてしまいます。'+
-        'Apps Script を1つ置くと、この仕組みが代わりに書くようになります。'+'デプロイは「実行＝自分」「アクセスできるユーザー＝全員」です。'+'「全員」でも、呼ばれるたびに社内の人かどうかを確かめています。')+
+      ? (en
+        ? 'This service writes to the spreadsheet on everyone\'s behalf. People who enter data need no access to the spreadsheet, so it can live in the accounting team\'s drive.'
+        : 'スプレッドシートに書くのは、この仕組みが代わりにやっています。'+
+          '記入する人はスプレッドシートの権限を持たなくて済むので、シートは総務経理のドライブに置けます。')
+      : (en
+        ? 'Right now each person writes to the spreadsheet themselves, so everyone needs edit access and can open it directly. Add one Apps Script and this service writes on their behalf. Deploy it as "Execute as: Me" and "Who has access: Anyone". Even set to Anyone, it checks on every call that the caller is inside the company.'
+        : 'いまは記入する人が自分でスプレッドシートに書いています。'+
+          'そのため全員にシートの編集権限が要り、シートを直接開けてしまいます。'+
+          'Apps Script を1つ置くと、この仕組みが代わりに書くようになります。'+
+          'デプロイは「実行＝自分」「アクセスできるユーザー＝全員」です。'+
+          '「全員」でも、呼ばれるたびに社内の人かどうかを確かめています。'))+
     '</p>'+
     '<div class="toolbar"><input type="text" id="gas-url" placeholder="https://script.google.com/.../exec" '+
       'value="'+esc((orgConfig && orgConfig.apiUrl) || '')+'" style="min-width:320px">'+
-      '<button class="btn sm" id="btn-gas-save">つなぐ</button>'+
-      (on ? '<button class="btn ghost sm" id="btn-gas-off">やめる</button>' : '')+'</div></div>';
+      '<button class="btn sm" id="btn-gas-save">'+(en?'Connect':'つなぐ')+'</button>'+
+      (on ? '<button class="btn ghost sm" id="btn-gas-off">'+(en?'Disconnect':'やめる')+'</button>' : '')+'</div></div>';
 }
+
 function wireGasBox(){
   var b = $('btn-gas-save');
   if(b) b.onclick = async function(){
