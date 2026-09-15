@@ -587,7 +587,7 @@
         <p class="lede">選択肢の追加と停止。止めても過去のデータは残ります。</p>
         <div class="toolbar">
           <select id="ms-list"></select>
-          <input type="text" id="ms-new" placeholder="足したい選択肢">
+          <input type="text" id="ms-new" placeholder="足したい選択肢（読点で区切れば一度に複数）" style="min-width:320px">
           <button class="btn sm" id="btn-ms-add">足す</button>
           <span class="spacer"></span>
           <button class="btn ghost sm" id="btn-ms-seed">初期値を入れ直す</button>
@@ -801,7 +801,7 @@ Object.assign(EN, {
   // マスタ
   'マスタ':'Master data','選択肢の追加と停止。止めても過去のデータは残ります。':
     'Add or stop options. Stopping one keeps all past data.',
-  '足したい選択肢':'Option to add','足す':'Add','初期値を入れ直す':'Restore default options',
+  '足したい選択肢':'Option to add','足したい選択肢（読点で区切れば一度に複数）':'Options to add (separate with commas for several at once)','足す':'Add','初期値を入れ直す':'Restore default options',
   '止めても過去のデータは残ります。新しい記入の選択肢に出なくなるだけです。':
     'Stopping an option keeps past data. It simply stops appearing in new entries.',
   '使用':'Used','最終使用':'Last used','有効':'Active','値':'Value','リスト':'List',
@@ -887,7 +887,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-15 v26';
+var BUILD = '2026-09-15 v28';
 var SCHEMA_VERSION = 3;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -2056,10 +2056,16 @@ function renderCost(){
   var depts = mvals('部門').map(function(m){ return m['値']; });
   var mine = myDepts();
   var sel = $('cost-dept');
-  if(!sel.options.length){
-    sel.innerHTML = depts.map(function(d){ return '<option>'+esc(d)+'</option>'; }).join('');
-    var pref = (me.dept ? me.dept.split(/[,、]/)[0].trim() : '') || busiestDept(depts);
-    if(pref && depts.indexOf(pref)>=0) sel.value = pref;
+  /* マスタの部門をそのまま使う。マスタで足した部門がここに出ないのを直した。 */
+  var cur = sel.value;
+  var want = depts.map(function(d){ return '<option>'+esc(d)+'</option>'; }).join('');
+  if(sel.innerHTML !== want){
+    sel.innerHTML = want;
+    if(cur && depts.indexOf(cur)>=0) sel.value = cur;
+    else {
+      var pref = (me.dept ? me.dept.split(/[,、]/)[0].trim() : '') || busiestDept(depts);
+      if(pref && depts.indexOf(pref)>=0) sel.value = pref;
+    }
   }
   var dept = sel.value || depts[0];
   var live = DB['購入'].filter(function(e){ return e['状態']!==ST.DRAFT && e['状態']!==ST.WD && e['状態']!==ST.REJ; });
@@ -2410,15 +2416,38 @@ async function removeAdmin(email){
   toast('外しました');
   renderAdmins();
 }
+var addingPerson = false;
 async function addPerson(){
+  if(addingPerson) return;          // 連打で二重に増えるのを防ぐ
   var v = $('person-new').value.trim().toLowerCase();
-  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)){ toast('メールアドレスを入れてください', true); return; }
-  if(DB['人'].some(function(u){ return (u['メール']||'').toLowerCase()===v; })){ toast('もう入っています'); return; }
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)){ toast(T('メールアドレスを入れてください','Please enter an email address'), true); return; }
+  if(DB['人'].some(function(u){ return (u['メール']||'').toLowerCase()===v; })){ toast(T('もう入っています','Already on the list')); return; }
+  addingPerson = true;
+  var btn = $('btn-person-add'); if(btn){ btn.disabled = true; btn.textContent = T('足しています…','Adding...'); }
+  try{
   var row = {'メール':v, '名前':v.split('@')[0], 'ロール':$('person-role').value, '部門':$('person-dept').value.trim(), '上長メール':''};
   await appendRow('人', row);
   await logAudit('人を追加', v, '', row['ロール']);
   $('person-new').value=''; $('person-dept').value='';
-  toast(v + ' を足しました');
+  toast(v + T(' を足しました',' added'));
+  await loadAll(); renderAll();
+  }finally{
+    addingPerson = false;
+    var b2 = $('btn-person-add'); if(b2){ b2.disabled = false; b2.textContent = T('足す','Add'); }
+  }
+}
+/* 人を外す。行は消さず、ロールを空にして一覧から隠す（過去の記録と辻褄を合わせるため）。 */
+async function removePerson(row){
+  var u = DB['人'].filter(function(x){ return x._row===row; })[0]; if(!u) return;
+  if((u['メール']||'').toLowerCase() === String(me.email).toLowerCase()){
+    toast(T('自分は外せません','You cannot remove yourself'), true); return;
+  }
+  if(!confirm(T(u['メール']+' を一覧から外しますか。過去の記録はそのまま残ります。',
+                'Remove '+u['メール']+' from the list? Past records are kept.'))) return;
+  u['ロール'] = 'off';
+  await saveRow('人', u);
+  await logAudit('人を外した', u['メール'], '', '');
+  toast(T('外しました','Removed'));
   await loadAll(); renderAll();
 }
 /* 書き込み役の設定。ここが入っていれば、記入する人はシートの権限を持たなくていい。 */
@@ -2542,8 +2571,8 @@ function renderSettings(){
     (!hasAcc ? '<div class="err">経理ロールの人がまだいません。いまは誰でもロールを変えられます。'+
       '最初に経理の方を決めてください。</div>' : '')+
     '<div class="tablewrap" style="box-shadow:none"><table><thead><tr>'+
-    '<th>名前</th><th>メール</th><th>ロール</th><th>部門</th></tr></thead><tbody>'+
-    DB['人'].map(function(u){
+    '<th>名前</th><th>メール</th><th>ロール</th><th>部門</th><th></th></tr></thead><tbody>'+
+    DB['人'].filter(function(u){ return u['ロール'] !== 'off'; }).map(function(u){
       var mine = (u['メール']||'').toLowerCase()===me.email.toLowerCase();
       return '<tr'+(mine?' style="background:var(--accent-soft)"':'')+'><td>'+esc(u['名前'])+(mine?'　<span class="pill p-info">あなた</span>':'')+'</td>'+
         '<td class="mono" style="font-size:.9em">'+esc(u['メール'])+'</td>'+
@@ -2554,7 +2583,9 @@ function renderSettings(){
           : esc(ROLE_NAME[u['ロール']]||u['ロール']))+'</td>'+
         '<td>'+(canEdit
           ? '<input type="text" data-user="'+u._row+'" data-f="部門" value="'+esc(u['部門'])+'" style="width:180px;font-size:.8rem;padding:3px 8px" placeholder="課長は担当の課">'
-          : esc(u['部門']||'—'))+'</td></tr>';
+          : esc(u['部門']||'—'))+'</td>'+
+        '<td>'+(canEdit && !mine ? '<button class="btn ghost sm" data-delperson="'+u._row+'">'+
+          (isEn()?'Remove':'外す')+'</button>' : '')+'</td></tr>';
     }).join('')+'</tbody></table></div>'+
     '<p class="hint" style="margin-top:10px">'+
     '課長は「部門」に担当の課を書いてください。複数あるときは読点で区切ります。'+
@@ -2587,14 +2618,37 @@ async function toggleMaster(row){
   await logAudit(on?'マスタ停止':'マスタ有効化', m['リスト']+'/'+m['値'], String(on), String(!on));
   await loadAll(); renderAll();
 }
+var addingMaster = false;
+/* まとめて足せる。読点・カンマ・改行で区切って、いくつでも一度に入れられる。 */
 async function addMaster(){
-  var list = $('ms-list').value, v = $('ms-new').value.trim();
-  if(!v) return;
-  await appendRow('マスタ', {'リスト':list, '値':v, '有効':'TRUE', '並び':String(DB['マスタ'].length+1), '使用回数':'0', '最終使用':''});
-  await logAudit('マスタ追加', list+'/'+v, '', v);
-  $('ms-new').value='';
-  toast('足しました');
-  await loadAll(); renderAll();
+  if(addingMaster) return;
+  var list = $('ms-list').value, raw = $('ms-new').value.trim();
+  if(!raw) return;
+  var vals = raw.split(/[,、\n\t]+/).map(function(x){ return x.trim(); }).filter(Boolean);
+  var have = {};
+  DB['マスタ'].forEach(function(m){ if(m['リスト']===list) have[m['値']] = 1; });
+  var add = vals.filter(function(v){ return !have[v]; });
+  var dup = vals.length - add.length;
+  if(!add.length){ toast(T('もう入っています','Already on the list')); return; }
+  addingMaster = true;
+  var btn = $('btn-ms-add'); if(btn) btn.disabled = true;
+  try{
+    for(var i=0;i<add.length;i++){
+      if(btn) btn.textContent = T('足しています… ','Adding... ')+(i+1)+'/'+add.length;
+      await appendRow('マスタ', {'リスト':list, '値':add[i], '有効':'TRUE',
+        '並び':String(DB['マスタ'].length+1+i), '使用回数':'0', '最終使用':''});
+      await logAudit('マスタ追加', list+'/'+add[i], '', add[i]);
+    }
+    $('ms-new').value='';
+    toast(T(add.length+'件を足しました'+(dup?'（'+dup+'件はすでにありました）':''),
+            'Added '+add.length+(dup?' ('+dup+' already existed)':'')));
+    await loadAll(); renderAll();
+  }catch(e){
+    toast(T('足せませんでした：','Could not add: ')+e.message, true);
+  }finally{
+    addingMaster = false;
+    var b = $('btn-ms-add'); if(b){ b.disabled=false; b.textContent = T('足す','Add'); }
+  }
 }
 
 /* ==================== CSV ==================== */
@@ -2798,7 +2852,7 @@ function wire(){
   };
 
   document.addEventListener('click', function(e){
-    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc],[data-deladmin],[data-payreq]');
+    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc],[data-deladmin],[data-payreq],[data-delperson]');
     if(!t) return;
     var d = t.dataset;
     if(d.go){ setTab(d.go); window.scrollTo({top:0,behavior:'smooth'}); }
@@ -2814,6 +2868,7 @@ function wire(){
     else if(d.delalloc) delAlloc(d.delalloc);
     else if(d.deladmin) removeAdmin(d.deladmin);
     else if(d.payreq) copyPayRequest(Number(d.payreq));
+    else if(d.delperson) removePerson(Number(d.delperson));
   });
   document.addEventListener('change', function(e){
     var s = e.target.closest('[data-user]');
