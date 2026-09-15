@@ -715,10 +715,127 @@ var EN = {
 };
 function tx(s){ if(!isEn()) return s; var k=String(s); return Object.prototype.hasOwnProperty.call(EN,k) ? EN[k] : s; }
 /* 静的な画面文言を切り替える。テキストノードに日本語の原文を控えておき、何度でも行き来できる。 */
+
+/* 追加の英語。画面を機械的に走査して、訳せていなかったものを埋めた（2026-09-15）。 */
+Object.assign(EN, {
+  // チェックする
+  'チェックする':'Review','チェック':'Review',
+  '自分の課に出されたものが溜まります。通してよければ1回押すだけで経理へ回ります。':
+    'Entries from your department collect here. One click passes them to accounting.',
+  '課長と経理だけが見る画面です。自分の課に出されたものが、ここに溜まります。通してよければ1回押すだけで経理へ回ります。':
+    'Only managers and accounting see this. Entries from your department collect here, and one click passes them to accounting.',
+  '通すと社長へ回ります':'Passing this sends it to the CEO',
+  '社長のチェックが必要':'Needs CEO approval',
+  'チェック済にする':'Mark as reviewed','差し戻す':'Send back',
+  'チェック待ちはありません。':'Nothing to review.',
+  '差し戻すときは理由が必須です。申請者に理由つきで通知されます。':
+    'A reason is required when sending back. The person is notified with your reason.',
+  '差し戻す理由を書いてください。本人に届きます。':'Write why you are sending it back. The person will see this.',
+  '金額を直す':'Edit amount',
+  // 入金
+  '入金予定':'Incoming payments','入金':'Income',
+  '売上をいつの月に立てるかを、期日から仕分けます。':'Sorts income by due date so it lands in the right month.',
+  '今月に入金予定':'Due this month','先の予定':'Due later','期日を過ぎている':'Past due',
+  '確認してほしい':'Needs a look','税抜と税込の差':'Gap between excl. and incl. tax',
+  '入金予定を足す':'Add income','まだ入金予定がありません。':'No income entries yet.',
+  '入金を確認':'Confirm receipt','入金の確認':'Receipt confirmation',
+  '税抜と税込の差が大きいです':'The gap between excl. and incl. tax is large',
+  'この画面は読み取り専用です。入金の確認だけ、経理が押せます。':
+    'This screen is read-only. Only accounting can confirm receipt.',
+  '記入日':'Entered','担当':'Owner','振込期日':'Due date','状態':'Status',
+  '入金済':'Received','期日前':'Before due','今月':'This month',
+  // 台帳
+  '台帳':'Ledger','確定したものが並びます。ここでは書き換えられません。':
+    'Confirmed entries are listed here. You cannot edit on this screen.',
+  'すべての部門':'All departments','すべての状態':'All statuses','すべての事業':'All projects',
+  '品名・購入先で探す':'Search by item or vendor','該当がありません。':'Nothing matches.',
+  '品名 / 理由':'Item / Purpose','購入先':'Vendor','税込':'Incl. tax','税抜':'Excl. tax',
+  '支払方法':'Payment method','証憑':'Evidence','支払日':'Paid on','不足':'Missing','開く':'Open',
+  '支払済に':'Mark as paid','支払依頼の文面':'Payment request text',
+  '🔒 ここでは直せません。修正は経理へ。変更はすべて「履歴」タブに残ります。':
+    'You cannot edit here. Ask accounting to correct it. Every change is kept in the History tab.',
+  '下書き':'Draft','チェック待ち':'Awaiting review','社長待ち':'Awaiting CEO',
+  '承認済':'Approved','支払済':'Paid','差し戻し':'Sent back','取り下げ':'Withdrawn',
+  '領収書待ち':'Awaiting receipt','返金待ち':'Awaiting refund','支払待ち':'Awaiting payment',
+  'CSVで出す':'Export CSV','補助事業ごとに証憑をまとめる':'Bundle evidence by project',
+  // 課のコスト
+  '課のコスト':'Department costs',
+  '締めを待たずに見られます。まだ払っていないもの、チェック待ちのものも含めた見込みです。':
+    'See it without waiting for the close. Includes unpaid and unreviewed entries.',
+  '月ごとの推移':'Month by month','今月の内訳':'This month by account item','多い順':'Largest first',
+  '未確定を入れた見込み':'Forecast including unconfirmed','チェック待ちを含む':'Includes items awaiting review',
+  '直近12か月の累計':'Last 12 months','毎月かならず出る費用':'Recurring monthly cost',
+  '按分したあとの金額':'After allocation','まだデータがありません。':'No data yet.',
+  '今月の費用はまだありません。':'No cost recorded this month yet.',
+  '棒にカーソルを当てると金額が出ます。破線より下が動かせない費用です。':
+    'Hover a bar to see the amount. Everything below the dashed line is fixed cost.',
+  '薄い棒はまだ確定していないものです。':'Faded bars are not yet confirmed.',
+  '課への按分':'Allocation across departments','分け方を足す':'Add a rule',
+  'この分け方をやめる':'Stop this rule','まだ按分ルールがありません。':'No allocation rules yet.',
+  '1件の費用を複数の課で分けます。品名にキーワードが入っていると、このルールが当たります。端数は1円まで合わせて、いちばん大きい課に寄せます。台帳は元の1件のまま、証憑も1枚のままです。':
+    'Split one cost across departments. A rule applies when its keyword appears in the item name. Rounding is settled to the last unit and given to the largest share. The ledger keeps one entry and one set of evidence.',
+  '課':'Department','重み':'Weight','比率':'Share',
+  // 抜けているもの
+  '抜けているもの':'Missing items','足りないものを自動で拾います。人が気づく必要はありません。':
+    'Missing items are found automatically. Nobody has to notice them.',
+  '足りないものはありません。':'Nothing is missing.','証憑が足りない':'Evidence missing',
+  '仕訳が起こせない':'Cannot post journal entry','日付が空':'Date is blank','検収日が空':'Received date is blank',
+  '入金の確認がない':'Receipt not confirmed','税抜と税込が合わない':'Excl. and incl. tax do not match',
+  '請求書がない':'No invoice','証憑がない':'No evidence','領収書がない':'No receipt',
+  '発注書・納品書・請求書がない':'No purchase order, delivery note or invoice',
+  'どの証憑が要るか':'Which evidence is required','こういうとき':'Situation','要る証憑':'Required evidence',
+  '何が足りないか':'What is missing','だれの':'Whose','放置':'Open for','対象':'Entry',
+  'あるもの':'Whatever exists','仕訳に要るもの':'Needed for the journal entry',
+  '請求書 か 領収書 のどちらか（必ず要る）':'Either an invoice or a receipt (always required)',
+  '請求書か領収書は必ず要ります':'An invoice or a receipt is always required',
+  '見積書・発注書・納品書・振込証憑も、あれば全部入れる':
+    'Also store the quotation, purchase order, delivery note and payment proof if they exist',
+  '項目・税込金額・支払方法・証憑・インボイスNo':'Account item, amount incl. tax, payment method, evidence, GSTIN',
+  'これが無いと経理が仕訳を起こせません':'Accounting cannot post the journal entry without this',
+  '納品済のはずですが日付が入っていません':'It should have arrived but no date is recorded',
+  '桁の間違いかもしれません':'This may be a digit error',
+  '売上の証憑が入っていません':'No evidence stored for this income',
+  '期日を過ぎています':'It is past the due date','差し戻されたまま':'Sent back and not yet fixed',
+  '締めと支払':'Deadlines and payment','仕入の請求書':'Supplier invoices','立替の領収書':'Reimbursement receipts',
+  '証憑を上げる':'Upload evidence','催促する':'Send a reminder','知らせ方':'How you are notified',
+  // マスタ
+  'マスタ':'Master data','選択肢の追加と停止。止めても過去のデータは残ります。':
+    'Add or stop options. Stopping one keeps all past data.',
+  '足したい選択肢':'Option to add','足す':'Add','初期値を入れ直す':'Restore default options',
+  '止めても過去のデータは残ります。新しい記入の選択肢に出なくなるだけです。':
+    'Stopping an option keeps past data. It simply stops appearing in new entries.',
+  '使用':'Used','最終使用':'Last used','有効':'Active','値':'Value','リスト':'List',
+  '部門':'Department','項目':'Account item','事業':'Project','入金部門':'Income department',
+  // 設定
+  '設定':'Settings','管理者':'Admins','人とロール':'People and roles','つないでいる先':'Connected to',
+  '管理者と、人のロール。管理者に登録した人は経理ロールになります。設定は会社の設定ファイルに入るので、一度決めれば全員に効きます。':
+    'Admins and roles. Anyone registered as an admin gets the accounting role. Settings live in the company settings file, so one change applies to everyone.',
+  '管理者は経理ロールになります。まだログインしたことがない人も、メールで先に登録できます。この一覧は会社の設定ファイル（Googleドライブの choreia-budget-config.json）に入ります。':
+    'Admins get the accounting role. You can register someone by email before they have ever signed in. This list is kept in the company settings file on Google Drive.',
+  '管理者を増やせるのは管理者だけです。':'Only admins can add admins.',
+  '管理者にする':'Make admin','外す':'Remove','オーナー':'Owner','あなた':'you',
+  'メール':'Email','名前':'Name','ロール':'Role','一般ユーザ':'Staff','課長':'Manager','経理':'Accounting','社長':'CEO',
+  '課長は「部門」に担当の課を書いてください。複数あるときは読点で区切ります。':
+    'For a manager, enter the department they look after. Separate several with commas.',
+  'ログインしたことがない人も、先に登録しておけます。':'You can register people who have never signed in.',
+  '部門（課長のとき）':'Department (for managers)','課長は担当の課':'Department the manager looks after',
+  'メールアドレス':'Email address','この画面の版':'App version','スプレッドシート':'Spreadsheet',
+  '証憑フォルダ':'Evidence folder','スプレッドシートを変える':'Change spreadsheet',
+  '新しいスプレッドシートのURLを貼る':'Paste the new spreadsheet URL','切り替える':'Switch',
+  '全員の向き先が変わります。いまの中身は移りません。書き込み役を使っているときは、あちらの SPREADSHEET_ID も同じIDに変えてください。':
+    'This changes where everyone points. Existing content is not moved. If you use the writer service, change its SPREADSHEET_ID to the same spreadsheet.',
+  '書き込み役':'Writer service','使っています':'In use','使っていません':'Not in use','やめる':'Disconnect','つなぐ':'Connect',
+  'スプレッドシートに書くのは、この仕組みが代わりにやっています。記入する人はスプレッドシートの権限を持たなくて済むので、シートは総務経理のドライブに置けます。':
+    'This service writes to the spreadsheet on everyone\'s behalf. People who enter data need no access to the spreadsheet, so it can live in the accounting team\'s drive.',
+  // 共通
+  'すべて':'All','ありません':'None','不明':'Unknown','ログアウト':'Sign out',
+  '拠点 / Location':'Location','日本（m2-labo.jp）':'Japan (m2-labo.jp)','India（m2-labo.in）':'India (m2-labo.in)'
+});
+
 function applyLang(){
   var en = isEn();
   document.documentElement.lang = en ? 'en' : 'ja';
-  var roots = ['gate','setup','tabs','apply','gaps','settings'];
+  var roots = ['gate','setup','tabs','apply','approve','income','ledger','cost','gaps','master','settings'];
   var hdr = document.querySelector('header.app'); if(hdr) roots.unshift(hdr);
   roots.forEach(function(r){
     var root = typeof r==='string' ? $(r) : r; if(!root) return;
@@ -727,7 +844,6 @@ function applyLang(){
     while((n = walker.nextNode())) nodes.push(n);
     nodes.forEach(function(t){
       var pe = t.parentElement; if(!pe || /^(SCRIPT|STYLE)$/.test(pe.tagName)) return;
-      if(pe.closest && pe.closest('#my-list,#my-alert,#gaps-list,#gap-table,.tablewrap')) return;
       var raw = t.nodeValue, trimmed = raw.trim(); if(!trimmed) return;
       if(t.__ja === undefined){ if(!Object.prototype.hasOwnProperty.call(EN, trimmed)) return; t.__ja = trimmed; }
       var out = en ? (EN[t.__ja]!==undefined ? EN[t.__ja] : t.__ja) : t.__ja;
@@ -771,7 +887,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-15 v17';
+var BUILD = '2026-09-15 v22';
 var SCHEMA_VERSION = 3;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -1678,10 +1794,10 @@ function renderApprove(){
         '<span class="num" style="margin-left:auto;font-size:1.05rem;font-weight:600">'+yen(e['税込'])+'</span>'+
       '</div>'+
       '<div style="color:var(--sub);font-size:.85rem;margin-top:6px">'+
-        esc(e['部門'])+' ／ '+esc(e['項目']||'項目未設定')+' ／ '+esc(e['購入先']||'購入先未記入')+' ／ '+esc(e['支払方法']||'')+
-        '　—　記入 '+esc(e['記入者'])+'（'+md(e['記入日時'])+'）</div>'+
-      '<div style="color:var(--sub);font-size:.85rem;margin-top:4px">理由：'+esc(e['購入理由'])+'</div>'+
-      (miss.length ? '<div style="margin-top:8px"><span class="pill p-warn">'+esc(miss.join('・'))+'がまだ</span></div>' : '')+
+        esc(e['部門'])+' ／ '+esc(e['項目']||(isEn()?'no account item':'項目未設定'))+' ／ '+esc(e['購入先']||(isEn()?'no vendor':'購入先未記入'))+' ／ '+esc(e['支払方法']||'')+
+        (isEn()?'  —  entered by ':'　—　記入 ')+esc(e['記入者'])+'（'+md(e['記入日時'])+'）</div>'+
+      '<div style="color:var(--sub);font-size:.85rem;margin-top:4px">'+(isEn()?'Purpose: ':'理由：')+esc(e['購入理由'])+'</div>'+
+      (miss.length ? '<div style="margin-top:8px"><span class="pill p-warn">'+esc(evNames(miss))+(isEn()?' still missing':'がまだ')+'</span></div>' : '')+
       (e['証憑フォルダ'] ? '<div class="filelist"><a href="'+esc(e['証憑フォルダ'])+'" target="_blank" rel="noopener">証憑フォルダを開く</a></div>' : '')+
       '<div class="actions"><button class="btn" data-ok="'+e._row+'">チェック済にする</button>'+
       '<button class="btn ghost" data-rej="'+e._row+'">差し戻す</button></div>'+
@@ -1722,7 +1838,7 @@ async function doReject(row){
 function incomeState(r){
   if(r['入金確認日']) return '<span class="pill p-ok">入金済 '+md(r['入金確認日'])+'</span>';
   var d = daysAgo(r['振込期日']);
-  if(d > 0) return '<span class="pill p-bad">期日超過 '+d+'日</span>';
+  if(d > 0) return '<span class="pill p-bad">'+(isEn()?('Past due by '+days(d)):('期日超過 '+d+'日'))+'</span>';
   if(ym(r['振込期日'])===ym(today())) return '<span class="pill p-warn">今月</span>';
   return '<span class="pill p-mute">期日前</span>';
 }
@@ -1738,11 +1854,11 @@ function renderIncome(){
   var over  = rows.filter(function(r){ return !r['入金確認日'] && daysAgo(r['振込期日'])>0; });
   var sum = function(a){ return a.reduce(function(s,r){ return s+num(r['税込']); },0); };
   $('income-tiles').innerHTML =
-    tile('今月に入金予定', yen(sum(thisM)), thisM.length+'件') +
-    tile('先の予定', yen(sum(later)), later.length+'件') +
-    (over.length ? '<div class="tile alert"><div class="k">期日を過ぎている</div><div class="v">'+yen(sum(over))+'</div><div class="n">'+over.length+'件</div></div>'
-                 : tile('期日を過ぎている', '0件', 'ありません')) +
-    tile('確認してほしい', rows.filter(taxOdd).length+'件', '税抜と税込の差');
+    tile('今月に入金予定', yen(sum(thisM)), cnt(thisM.length)) +
+    tile('先の予定', yen(sum(later)), cnt(later.length)) +
+    (over.length ? '<div class="tile alert"><div class="k">期日を過ぎている</div><div class="v">'+yen(sum(over))+'</div><div class="n">'+cnt(over.length)+'</div></div>'
+                 : tile('期日を過ぎている', cnt(0), 'ありません')) +
+    tile('確認してほしい', cnt(rows.filter(taxOdd).length), '税抜と税込の差');
   if(!rows.length){ $('income-list').innerHTML='<div class="empty">まだ入金予定がありません。</div>'; return; }
   $('income-list').innerHTML = '<div class="tablewrap"><table><thead><tr>'+
     '<th>記入日</th><th>担当</th><th>部門</th><th>項目</th><th>税込</th><th>税抜</th><th>振込期日</th><th>状態</th><th></th>'+
@@ -1756,6 +1872,21 @@ function renderIncome(){
     }).join('') + '</tbody></table></div>';
 }
 function tile(k,v,n){ return '<div class="tile"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div><div class="n">'+esc(n)+'</div></div>'; }
+/* 件数・日数・月あたり などの言い回し。辞書では直せないのでここで分ける。 */
+function cnt(n){ return isEn() ? (n + (n===1?' item':' items')) : (n +(isEn()?' items':'件')); }
+function days(n){ return isEn() ? (n + (n===1?' day':' days')) : (n + '日'); }
+/* グラフの目盛り。日本は万、インドはk/L（ラーク）。 */
+function axisNum(v){
+  if(!isEn()) return v>=10000 ? Math.round(v/10000)+'万' : Math.round(v);
+  if(v>=100000) return (v/100000).toFixed(v%100000?1:0)+'L';
+  if(v>=1000)   return Math.round(v/1000)+'k';
+  return Math.round(v);
+}
+/* 証憑の種類の名前 */
+var EV_EN = {'見積書':'Quotation','発注書':'Purchase order','納品書':'Delivery note',
+             '請求書':'Invoice','領収書':'Receipt','振込証憑':'Payment proof','その他':'Other'};
+function evName(t){ return isEn() ? (EV_EN[t]||t) : t; }
+function evNames(a){ return a.map(evName).join(isEn()?', ':'・'); }
 
 async function addIncome(){
   var title = prompt('入金の項目（例：やさいバス食堂 業務委託費用 9月分）'); if(!title) return;
@@ -1954,17 +2085,17 @@ function renderCost(){
   });
   var mcount = months.length || 1;
   $('cost-tiles').innerHTML =
-    tile(curM.replace('-','年')+'月の確定', yen(confirmed), '按分したあとの金額') +
+    tile((isEn() ? ('Confirmed for '+curM) : (curM.replace('-','年')+'月の確定')), yen(confirmed), '按分したあとの金額') +
     '<div class="tile" style="border-color:var(--accent)"><div class="k">未確定を入れた見込み</div><div class="v">'+
       yen(confirmed+pending)+'</div><div class="n">チェック待ちを含む</div></div>' +
-    tile('直近12か月の累計', yen(total), '月あたり ' + yen(Math.round(total/mcount))) +
-    tile('毎月かならず出る費用', yen(fixed), fixedCount+'件（3か月続けて出ているもの）');
+    tile('直近12か月の累計', yen(total), (isEn() ? ('per month ' + yen(Math.round(total/mcount))) : ('月あたり ' + yen(Math.round(total/mcount))))) +
+    tile('毎月かならず出る費用', yen(fixed), (isEn() ? cnt(fixedCount)+' (present 3 months running)' : fixedCount+'件（3か月続けて出ているもの）'));
   $('cost-chart1').innerHTML = months.length
     ? barChart(months.map(function(m){ return {label:m, value:byMonth[m]}; }), fixed) +
       '<p class="hint" style="margin-top:6px">棒にカーソルを当てると金額が出ます。破線より下が動かせない費用です。</p>'
     : '<div class="empty">まだデータがありません。</div>';
   var items = Object.keys(byItem).map(function(k){ return {label:k, value:byItem[k], pending:false}; })
-    .concat(Object.keys(byItemPending).map(function(k){ return {label:k+'（未確定）', value:byItemPending[k], pending:true}; }))
+    .concat(Object.keys(byItemPending).map(function(k){ return {label:k+(isEn()?' (unconfirmed)':'（未確定）'), value:byItemPending[k], pending:true}; }))
     .sort(function(a,b){ return b.value-a.value; });
   $('cost-chart2').innerHTML = items.length
     ? hBarChart(items) + '<p class="hint" style="margin-top:6px">薄い棒はまだ確定していないものです。</p>'
@@ -1983,7 +2114,7 @@ function barChart(data, fixedLine){
     var v=ymax*f, yy=y(v);
     p.push('<line x1="'+L+'" y1="'+yy.toFixed(1)+'" x2="'+R+'" y2="'+yy.toFixed(1)+'" stroke="var(--line)" stroke-width="1"/>');
     p.push('<text x="'+(L-9)+'" y="'+(yy+4).toFixed(1)+'" text-anchor="end" font-size="10.5" fill="var(--muted)">'+
-      (v>=10000? Math.round(v/10000)+'万' : Math.round(v))+'</text>');
+      axisNum(v)+'</text>');
   });
   data.forEach(function(d,i){
     var x=L+slot*i+(slot-bw)/2, top=y(d.value), r=Math.min(3,bw/2,Math.max(B-top,0));
@@ -2031,17 +2162,19 @@ function findGaps(){
   DB['購入'].forEach(function(e){
     if(e['状態']===ST.DRAFT || e['状態']===ST.WD) return;
     if(!scope(e)) return;
-    var sub = e['部門']+' ／ '+(e['項目']||'項目未設定')+' ／ '+yen(e['税込']);
+    var sub = e['部門']+' ／ '+(e['項目']||(isEn()?'no account item':'項目未設定'))+' ／ '+yen(e['税込']);
     var miss = evMissing(e);
     if(miss.length){
       var limit = submitDueOf(e);
       var late = daysAgo(limit);
       out.push({kind:'証憑', id:e.id, title:e['品名'], sub:sub,
-        what:miss.join('・')+'がない',
+        what: isEn() ? (evNames(miss)+' missing') : (miss.join('・')+'がない'),
         why:(e['事業'] && projectEvidence(e['事業']).length
-              ? e['事業']+'は'+projectEvidence(e['事業']).join('・')+'が要ります'
-              : '請求書か領収書は必ず要ります')+
-            '（提出期限 '+limit+(late>0 ? '／'+late+'日すぎています' : '')+'）',
+              ? (isEn() ? (e['事業']+' requires '+evNames(projectEvidence(e['事業'])))
+                        : (e['事業']+'は'+projectEvidence(e['事業']).join('・')+'が要ります'))
+              : (isEn() ? 'An invoice or a receipt is always required'
+                        : '請求書か領収書は必ず要ります'))+
+            (isEn()?' (due ':'（提出期限 ')+limit+(late>0 ? (isEn()?', ':'／')+(isEn() ? (days(late)+' late') : (late+'日すぎています')) : '')+(isEn()?')':'）'),
         who:e['記入者'], days:Math.max(late, daysAgo(e['更新日時']||e['記入日時'])), row:e._row, sheet:'購入'});
     }
     if(e['状態']===ST.OK || e['状態']===ST.PAID){
@@ -2062,14 +2195,14 @@ function findGaps(){
   if(me.role==='acc' || me.role==='mgr'){
     DB['入金'].forEach(function(r){
       if(!r['入金確認日'] && daysAgo(r['振込期日'])>0)
-        out.push({kind:'入金', id:r.id, title:r['項目'], sub:'入金 ／ '+yen(r['税込'])+' ／ 期日 '+ymd(r['振込期日']),
+        out.push({kind:'入金', id:r.id, title:r['項目'], sub:(isEn()?'Income / ':'入金 ／ ')+yen(r['税込'])+(isEn()?' / due ':' ／ 期日 ')+ymd(r['振込期日']),
           what:'入金の確認がない', why:'期日を過ぎています', who:r['記入者'], days:daysAgo(r['振込期日']), row:r._row, sheet:'入金'});
       if(taxOdd(r))
-        out.push({kind:'金額', id:r.id, title:r['項目'], sub:'入金 ／ 税込'+yen(r['税込'])+' ／ 税抜'+yen(r['税抜']),
+        out.push({kind:'金額', id:r.id, title:r['項目'], sub:(isEn()?('Income / incl. '+yen(r['税込'])+' / excl. '+yen(r['税抜'])):('入金 ／ 税込'+yen(r['税込'])+' ／ 税抜'+yen(r['税抜']))),
           what:'税抜と税込が合わない', why:'桁の間違いかもしれません', who:r['記入者'],
           days:daysAgo(r['記入日時']), row:r._row, sheet:'入金'});
       if(!r['証憑'] && !r['入金確認日'])
-        out.push({kind:'証憑', id:r.id, title:r['項目'], sub:'入金 ／ '+yen(r['税込']), what:'請求書がない',
+        out.push({kind:'証憑', id:r.id, title:r['項目'], sub:(isEn()?'Income / ':'入金 ／ ')+yen(r['税込']), what:'請求書がない',
           why:'売上の証憑が入っていません', who:r['記入者'], days:daysAgo(r['記入日時']), row:r._row, sheet:'入金'});
     });
   }
@@ -2081,12 +2214,12 @@ function renderGaps(){
   $('cnt-gaps').hidden = !g.length;
   var by = function(k){ return g.filter(function(x){ return x.kind===k; }).length; };
   $('gaps-tiles').innerHTML =
-    (by('証憑') ? '<div class="tile alert"><div class="k">証憑が足りない</div><div class="v">'+by('証憑')+'件</div><div class="n">請求書か領収書は必ず要ります</div></div>'
-                : tile('証憑が足りない','0件','ありません')) +
-    (by('仕訳') ? '<div class="tile alert"><div class="k">仕訳が起こせない</div><div class="v">'+by('仕訳')+'件</div><div class="n">項目・インボイスNoなど</div></div>'
-                : tile('仕訳が起こせない','0件','ありません')) +
-    tile('日付が空', by('日付')+'件', '検収日') +
-    tile('期日を過ぎている', by('入金')+'件', '入金の確認');
+    (by('証憑') ? '<div class="tile alert"><div class="k">証憑が足りない</div><div class="v">'+cnt(by('証憑'))+'</div><div class="n">請求書か領収書は必ず要ります</div></div>'
+                : tile('証憑が足りない',cnt(0),'ありません')) +
+    (by('仕訳') ? '<div class="tile alert"><div class="k">仕訳が起こせない</div><div class="v">'+cnt(by('仕訳'))+'</div><div class="n">項目・インボイスNoなど</div></div>'
+                : tile('仕訳が起こせない',cnt(0),'ありません')) +
+    tile('日付が空', cnt(by('日付')), isEn()?'Received date':'検収日') +
+    tile('期日を過ぎている', cnt(by('入金')), '入金の確認');
   if(!g.length){ $('gaps-list').innerHTML='<div class="empty">足りないものはありません。</div>'; }
   else {
     $('gaps-list').innerHTML = '<div class="tablewrap"><table><thead><tr>'+
@@ -2094,7 +2227,7 @@ function renderGaps(){
       g.map(function(x){
         return '<tr><td class="name"><span class="mono">'+esc(x.id)+'</span> '+esc(x.title)+'<small>'+esc(x.sub)+'</small></td>'+
           '<td><span class="pill p-bad">'+esc(x.what)+'</span><div class="hint" style="margin-top:4px">'+esc(x.why)+'</div></td>'+
-          '<td>'+esc(x.who)+'</td><td class="mono">'+x.days+'日</td>'+
+          '<td>'+esc(x.who)+'</td><td class="mono">'+days(x.days)+'</td>'+
           '<td>'+(x.sheet==='購入' && x.kind==='証憑' ? '<button class="btn ghost sm" data-ev="'+x.row+'">証憑を上げる</button>' : '')+'</td></tr>';
       }).join('')+'</tbody></table></div>';
   }
@@ -2103,8 +2236,11 @@ function renderGaps(){
                ['あるもの','見積書・発注書・納品書・振込証憑も、あれば全部入れる'],
                ['仕訳に要るもの','項目・税込金額・支払方法・証憑・インボイスNo']];
   Object.keys(pe).forEach(function(k){ rules.push([k+'（事業）', pe[k].join('・')]); });
-  var deadlines = [['仕入の請求書','毎月10日までに提出。月末締め、翌月末払い'],
-                   ['立替の領収書','翌月1日までに提出。月末締め、翌月25日に給与とともに精算']];
+  var deadlines = isEn()
+    ? [['Supplier invoices','Submit by the 10th. Closed month-end, paid end of the following month.'],
+       ['Reimbursement receipts','Submit by the 1st of the following month. Paid on the 25th with salary.']]
+    : [['仕入の請求書','毎月10日までに提出。月末締め、翌月末払い'],
+       ['立替の領収書','翌月1日までに提出。月末締め、翌月25日に給与とともに精算']];
   $('rules-box').innerHTML = '<div class="tablewrap" style="box-shadow:none"><table style="min-width:0"><thead><tr>'+
     '<th>こういうとき</th><th>要る証憑</th></tr></thead><tbody>'+
     rules.map(function(r){ return '<tr><td>'+esc(r[0])+'</td><td>'+esc(r[1])+'</td></tr>'; }).join('')+
@@ -2113,8 +2249,9 @@ function renderGaps(){
     '<div class="tablewrap" style="box-shadow:none"><table style="min-width:0"><tbody>'+
     deadlines.map(function(r){ return '<tr><td>'+esc(r[0])+'</td><td>'+esc(r[1])+'</td></tr>'; }).join('')+
     '</tbody></table></div>'+
-    '<p class="hint" style="margin-top:10px">名波さんに教えていただいたルールです。'+
-    '事業ごとの必要証憑は、設定ファイルの projectEvidence で足せます。</p>';
+    '<p class="hint" style="margin-top:10px">'+(isEn()?'':'名波さんに教えていただいたルールです。')+
+    (isEn()?'Required evidence per project can be set in the settings file.'
+           :'事業ごとの必要証憑は、設定ファイルの projectEvidence で足せます。')+'</p>';
 }
 function evModal(row){
   var e = DB['購入'].filter(function(x){ return x._row===row; })[0]; if(!e) return;
@@ -2170,7 +2307,9 @@ function renderMaster(){
     (stale.length ? '<div class="alertbar" style="background:var(--warn-soft);border-color:var(--warn)">'+
       '<span class="pill p-warn">'+stale.length+'件</span><span>一度も使われていない選択肢があります。期の切り替えで止められます。</span>'+
       '<button class="btn ghost sm" id="btn-stop-stale">まとめて止める</button></div>' : '') +
-    '<div class="tablewrap"><table><thead><tr><th>'+esc(list)+'（'+rows.length+'件）</th><th>使用</th><th>最終使用</th><th style="text-align:center">有効</th></tr></thead><tbody>'+
+    '<div class="tablewrap"><table><thead><tr><th>'+esc(isEn()?(EN[list]||list):list)+
+      (isEn()?(' ('+rows.length+')'):('（'+rows.length+'件）'))+'</th><th>'+(isEn()?'Used':'使用')+
+      '</th><th>'+(isEn()?'Last used':'最終使用')+'</th><th style="text-align:center">'+(isEn()?'Active':'有効')+'</th></tr></thead><tbody>'+
     rows.map(function(m){
       var on = String(m['有効']).toUpperCase()!=='FALSE';
       return '<tr class="'+(on?'':'off')+'"><td>'+esc(m['値'])+'</td><td class="num">'+num(m['使用回数'])+'</td>'+
@@ -2182,7 +2321,7 @@ function renderMaster(){
   if(b) b.onclick = async function(){
     if(!confirm(stale.length+'件を止めます。よろしいですか。')) return;
     for(var i=0;i<stale.length;i++){ stale[i]['有効']='FALSE'; await saveRow('マスタ', stale[i]); }
-    await logAudit('マスタ一括停止', list, '', stale.length+'件');
+    await logAudit('マスタ一括停止', list, '', cnt(stale.length));
     toast(stale.length+'件を止めました');
     await loadAll(); renderAll();
   };
@@ -2500,6 +2639,7 @@ function renderAll(){
   if(me.role==='acc') renderMaster();
   renderSettings();
   updateRoute();
+  applyLang();   // 描いたあとの中身も訳す
 }
 
 /* ==================== イベント ==================== */
