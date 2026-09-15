@@ -630,7 +630,9 @@
    インド側は m2-labo.in の組織で別に作って、ここに入れる。 */
 var CLIENT_IDS = {
   jp: '595564106580-hsrunbvfacmr23d2jopl462taqilip75.apps.googleusercontent.com',
-  in: ''   /* ← m2-labo.in の組織で作ったクライアントIDを入れる */
+  /* Flow-IN と同じ窓口。別プロジェクトなので m2-labo.in でも通る見込み。
+     弾かれるようなら m2-labo.in の組織で別に作る。 */
+  in: '662511891553-9s7uas3qqcr7ivp03fhv2u2kkhk82f4o.apps.googleusercontent.com'
 };
 var REGION_KEY = 'cb_region';
 function region(){
@@ -769,7 +771,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-15 v16';
+var BUILD = '2026-09-15 v17';
 var SCHEMA_VERSION = 3;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
