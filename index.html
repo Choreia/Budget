@@ -887,7 +887,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-15 v28';
+var BUILD = '2026-09-15 v29';
 var SCHEMA_VERSION = 3;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -1361,8 +1361,24 @@ async function boot(){
     $('setup').hidden = false;
     $('setup').querySelector('.body').insertAdjacentHTML('afterbegin',
       '<div class="err">'+esc(e.message)+
-      '<div style="margin-top:8px;font-size:.9em;color:var(--sub)">ログイン中：<span class="mono">'+esc(me.email||'不明')+'</span>'+
-      (viaGas() ? '　書き込み役：使用中' : '　書き込み役：なし')+'</div></div>');
+      '<div style="margin-top:8px;font-size:.9em;color:var(--sub)">'+T('ログイン中：','Signed in as ')+
+      '<span class="mono">'+esc(me.email||'-')+'</span>'+
+      (viaGas() ? T('　書き込み役：使用中','  Writer service: in use') : T('　書き込み役：なし','  Writer service: none'))+'</div>'+
+      (viaGas() ? '<div class="actions" style="margin-top:12px">'+
+        '<button class="btn" id="btn-gas-bail">'+T('書き込み役を外して開く','Open without the writer service')+'</button>'+
+        '<span class="hint">'+T('書き込み役につながらないときの逃げ道です。外すとアプリが直接スプレッドシートに読み書きします。あとで設定タブからつなぎ直せます。',
+                               'Use this when the writer service cannot be reached. The app then reads and writes the spreadsheet directly. You can reconnect it later from Settings.')+'</span></div>' : '')+
+      '</div>');
+    var bail = $('btn-gas-bail');
+    if(bail) bail.onclick = async function(){
+      this.disabled = true; this.textContent = T('外しています…','Disconnecting...');
+      try{
+        delete orgConfig.apiUrl;
+        await saveConfig();
+      }catch(e2){ /* 設定ファイルに書けなくても、この端末では外して進める */ }
+      try{ localStorage.setItem(CONFIG_CACHE, JSON.stringify(orgConfig)); }catch(e3){}
+      location.reload();
+    };
   }
 }
 /* 選択肢をアプリから直接入れる。書き込み役の用意処理に頼らない確実な道。 */
