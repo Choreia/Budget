@@ -282,6 +282,7 @@
   <header class="app">
     <div class="brand">Choreia <span>予算</span></div>
     <div class="who" id="whoami" hidden></div>
+    <button class="btn ghost sm" id="btn-lang" title="Language / 言語">English</button>
     <button class="btn ghost sm" id="btn-signout" hidden>ログアウト</button>
   </header>
 
@@ -379,7 +380,7 @@
               <div class="field">
                 <label for="f-net">金額（税抜）</label>
                 <input type="text" id="f-net" class="mono" inputmode="numeric" placeholder="0">
-                <div class="hint">10%で自動計算。違うときは直してください。</div>
+                <div class="hint" id="hint-net">10%で自動計算。違うときは直してください。</div>
               </div>
             </div>
             <div class="field">
@@ -590,8 +591,102 @@ var SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapi
 var DOMAIN = localStorage.getItem('cb_domain') || 'm2-labo.jp';
 var SS_TITLE = 'Choreia 予算 データ';
 var TAX = 0.1;
+/* 拠点ごとの既定。インド拠点（m2-labo.in）は設定ファイルもシートも別になる（ドメインで見つける仕組みのため）。
+   税率・通貨・言語は設定ファイル(taxRate/currency/lang/locale)で上書きできる。 */
+var LOCALES = {
+  jp: {taxRate:0.10, currency:'JPY', lang:'ja', ssTitle:'Choreia 予算 データ',   evRoot:'Choreia 予算 証憑'},
+  in: {taxRate:0.18, currency:'INR', lang:'en', ssTitle:'Choreia Budget Data', evRoot:'Choreia Budget Evidence'}
+};
+function localeOf(){ if(orgConfig && orgConfig.locale && LOCALES[orgConfig.locale]) return orgConfig.locale; return /\.in$/.test(me.domain||'') ? 'in' : 'jp'; }
+function LOC(){ return LOCALES[localeOf()] || LOCALES.jp; }
+function applyOrgLocale(){ TAX = (orgConfig && Number(orgConfig.taxRate)) || LOC().taxRate; }
+function currency(){ return (orgConfig && orgConfig.currency) || LOC().currency; }
+function presLimit(){ return (orgConfig && Number(orgConfig.presLimit)) || PRES_LIMIT; }
+/* 言語。手で切り替えたものを最優先、次に設定ファイル、最後に拠点の既定。 */
+var LANG_KEY = 'cb_lang';
+function lang(){ var v=null; try{ v=localStorage.getItem(LANG_KEY); }catch(e){} if(v==='ja'||v==='en') return v; if(orgConfig && orgConfig.lang) return orgConfig.lang; return LOC().lang; }
+function isEn(){ return lang()==='en'; }
+/* 英語UI。購入フォームの13項目は Ishita さんの訳（purchase_form_translation.xlsx 2026-09-15）をそのまま使う。それ以外は暫定訳。 */
+var EN = {
+  // ヘッダー／ログイン／セットアップ
+  '予算':'Budget','ログアウト':'Sign out','Choreia 予算':'Choreia Budget','Googleでログイン':'Sign in with Google',
+  '購入の申請から支払いまでを1画面で。入力したものは会社のスプレッドシートにそのまま入ります。':'Purchase requests through payment on one screen. Everything you enter goes straight into the company spreadsheet.',
+  '会社のアカウントでログインしてください。':'Please sign in with your company account.',
+  'はじめの設定':'Initial setup','データの置き場所を決めます。最初の1回だけです。':'Choose where the data lives. This is done only once.',
+  '証憑を入れるフォルダ':'Folder for evidence','任意':'Optional','見積書や請求書を入れるGoogleドライブのフォルダです。':'The Google Drive folder where quotations and invoices are stored.',
+  'フォルダのURLを貼る':'Paste the folder URL','データを入れるスプレッドシート':'Spreadsheet for the data',
+  'はじめてなら「新しく作る」。ほかの人が作ったものにつなぐなら、URLを貼ってから「つなぐ」。':'First time: "Create new". To join one someone else created, paste its URL and press "Connect".',
+  'スプレッドシートのURLを貼る（つなぐときだけ）':'Paste the spreadsheet URL (only when connecting)','新しく作る':'Create new','つなぐ':'Connect',
+  // タブ
+  'わたしの記入':'My entries','チェックする':'Review','入金予定':'Incoming payments','台帳':'Ledger','課のコスト':'Department costs','抜けているもの':'Missing items','マスタ':'Master data','設定':'Settings',
+  // わたしの記入
+  '自分が出したものだけが並びます。ほかの人の分は出てきません。':'Only your own entries are listed here. Other people\'s entries do not appear.',
+  '出したもの':'Submitted','読み込み中…':'Loading…','新しく記入する':'New entry',
+  // 購入フォーム（Ishitaさん訳）
+  '品名':'Item Name','必須':'Required','買うものの名前':'Name of the item to be purchased','この名前で証憑フォルダを作ります。':'A folder for evidence will be created with this name.',
+  '購入理由':'Purpose of Purchase','何のために使うかを1〜2行で':'1–2 lines explaining what it will be used for.','経理が仕訳を起こすときに読む欄です。':'This section is read by accounting when creating journal entries.',
+  '金額（税込）':'Amount (Incl. Tax)','請求書や領収書に出ている金額です。':'Amount as shown on the invoice or receipt.',
+  '金額（税抜）':'Amount (Excl. Tax)',
+  '費用負担部門':'Cost-Bearing Department',
+  '項目（勘定科目）':'Account Item','迷ったら選ばずに出せます。経理が入れます。':'You can submit without selecting if you are unsure. Accounting will fill it in.',
+  '購入先':'Vendor','店名・会社名':'Shop Name / Company Name',
+  'インボイスNo':'Invoice No.','仕訳に要ります。請求書の登録番号です。立替なら空で構いません。':'Required for journal entries. This is the registration number on the invoice. Leave blank for employee reimbursements.',
+  '支払方法':'Payment Method','立替を選ぶと、返金までこの1件で追いかけます。':'If you select "Employee Reimbursement," we will track this single case until the refund is complete.',
+  '納品先':'Delivery Location','D-BASE / M2事務所 など':'Bengaluru office / Pune',
+  '事業（補助事業のときだけ）':'Project (Only for subsidized projects)','事業によって必要な証憑が変わります。':'Required evidence changes depending on the project.',
+  '請求書の原本は郵送されますか':'Will the original invoice be mailed?','郵送なし':'No mailing','郵送あり':'To be mailed',
+  '証憑':'Evidence','見積書・請求書など。あとから足せます。':'Attach the invoice to Google Drive. You can add more later.',
+  // 購入フォーム（暫定訳）
+  '立替の申請':'Employee reimbursement','これから買う（事前申請）':'Buying later (advance request)','もう買った（事後精算）':'Already bought (reimbursement)',
+  '事前に出しておけば、買ったあとに領収書を上げるだけで返金まで進みます。':'Submit in advance, then just upload the receipt after buying and the refund will proceed.',
+  '発注した日':'Order date','納品予定日':'Expected delivery date','検収日（納品された日）':'Acceptance date (date delivered)','納品後に入れます。あとから足せます。':'Fill in after delivery. Can be added later.',
+  'チェックに出す':'Submit for review','下書きで保存':'Save as draft','記入':'Entry','課長のチェック':'Manager review','社長のチェック':'President review','今回は不要':'Not needed this time','必要になります':'Will be required','経理・支払':'Accounting / payment',
+  '保存中…':'Saving…','が空です。埋めてから出してください。':'is required. Please fill it in before submitting.','保存できませんでした。':'Could not save.','下書きで保存しました':'Saved as draft','をチェックに出しました':'submitted for review',
+  // 一覧・状態
+  'No':'No','記入日':'Date','税込':'Incl. Tax','いまどこ':'Status','件':'','足りないものがあります。':'Some items are missing.','を直してください。':'need your attention.','見る':'View',
+  'まだ何も出していません。下の欄から記入してください。':'Nothing submitted yet. Use the form below.','差し戻し：':'Returned: ','がまだです':' still missing','直して出す':'Fix and resubmit','取り下げる':'Withdraw','証憑を上げる':'Upload evidence','出す':'Submit',
+  '出したあとは直せません。チェックの前なら取り下げ、差し戻されたら直して出し直しです。':'Entries cannot be edited after submission. Withdraw before review, or fix and resubmit if returned.',
+  '差し戻し':'Returned','下書き':'Draft','チェック待ち':'Awaiting review','社長待ち':'Awaiting president','取り下げ':'Withdrawn','支払済':'Paid','領収書待ち':'Awaiting receipt','返金待ち':'Awaiting refund','支払待ち':'Awaiting payment',
+  '一般ユーザ':'User','課長':'Manager','経理':'Accounting','社長':'President',
+  // 証憑
+  '見積書':'Quotation','発注書':'Purchase Order','納品書':'Delivery Note','請求書':'Invoice','領収書':'Receipt','振込証憑':'Transfer Proof','その他':'Other',
+  '請求書か領収書':'Invoice or Receipt','項目':'Account Item','税込金額':'Amount (Incl. Tax)',
+  'ファイル':'File','種類':'Type','上げる':'Upload','やめる':'Cancel','ファイルを選んでください':'Please choose a file','上げています…':'Uploading…','を上げました':' uploaded','上げられませんでした：':'Could not upload: ','足りないもの':'Missing','金額':'Amount','なし':'None',
+  'この条件だと ':'For this case, ',' が要ります。あとから足せます。':' is required. You can add it later.'
+};
+function tx(s){ if(!isEn()) return s; var k=String(s); return Object.prototype.hasOwnProperty.call(EN,k) ? EN[k] : s; }
+/* 静的な画面文言を切り替える。テキストノードに日本語の原文を控えておき、何度でも行き来できる。 */
+function applyLang(){
+  var en = isEn();
+  document.documentElement.lang = en ? 'en' : 'ja';
+  var roots = ['gate','setup','tabs','apply','gaps','settings'];
+  var hdr = document.querySelector('header.app'); if(hdr) roots.unshift(hdr);
+  roots.forEach(function(r){
+    var root = typeof r==='string' ? $(r) : r; if(!root) return;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var n; var nodes=[];
+    while((n = walker.nextNode())) nodes.push(n);
+    nodes.forEach(function(t){
+      var pe = t.parentElement; if(!pe || /^(SCRIPT|STYLE)$/.test(pe.tagName)) return;
+      if(pe.closest && pe.closest('#my-list,#my-alert,#gaps-list,#gap-table,.tablewrap')) return;
+      var raw = t.nodeValue, trimmed = raw.trim(); if(!trimmed) return;
+      if(t.__ja === undefined){ if(!Object.prototype.hasOwnProperty.call(EN, trimmed)) return; t.__ja = trimmed; }
+      var out = en ? (EN[t.__ja]!==undefined ? EN[t.__ja] : t.__ja) : t.__ja;
+      t.nodeValue = raw.replace(trimmed, out);
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[placeholder]'), function(el){
+      if(el.dataset.ja===undefined){ if(!Object.prototype.hasOwnProperty.call(EN, el.placeholder)) return; el.dataset.ja = el.placeholder; }
+      el.placeholder = en ? (EN[el.dataset.ja]||el.dataset.ja) : el.dataset.ja;
+    });
+  });
+  var rate = Math.round(TAX*100);
+  if($('hint-net')) $('hint-net').textContent = en ? ('Automatically calculated at '+rate+'%. Please correct if it is different.') : (rate+'%で自動計算。違うときは直してください。');
+  if($('btn-lang')) $('btn-lang').textContent = en ? '日本語' : 'English';
+  if($('f-invoice')) $('f-invoice').placeholder = 'T1234567890123';
+}
+function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-15 v13';
+var BUILD = '2026-09-15 v14';
 var SCHEMA_VERSION = 2;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -606,7 +701,7 @@ var SHEETS = {
   '履歴': ['日時','操作者','操作','対象','変更前','変更後']
 };
 
-var SEED = {
+var SEED_JP = {
   '部門': ['D-base','M2共通','SVL','ハード(製造原価)','事業企画(デザイン)','和泉市アグリセンター','協力隊','その他'],
   '項目': ['物品購入費','賃借料','水道光熱費','リース費','通信費','事務用品費','支払手数料','旅費交通費',
           '外注費','開発費','広告宣伝費','荷造運賃費','車両費','保険料','謝金','接待交際費','新聞図書費','その他経費'],
@@ -614,6 +709,19 @@ var SEED = {
   '事業': ['なし','スマ農R7','菊川市R7','鹿児島衛星R7','牧之原市協力隊','KAGOME','JICA','GS-India'],
   '入金部門': ['【AT】アグリテック','和泉市アグリセンター','協力隊','その他']
 };
+/* インド拠点の初期値（Ishitaさんの項目表の例をもとにした暫定。マスタ画面で直せる） */
+var SEED_IN = {
+  '部門': ['Bengaluru office','Other'],
+  '項目': ['Purchase of Goods','Rent','Utilities','Lease Fees','Communication Expenses','Office Supplies','Bank Charges','Travel Expenses',
+          'Outsourcing','Development','Advertising','Freight','Vehicle','Insurance','Honorarium','Entertainment','Books & Subscriptions','Other Expenses'],
+  '支払方法': ['Bank Transfer','Company Card','Auto Debit','Employee Reimbursement','International Remittance','Cash'],
+  '事業': ['None'],
+  '入金部門': ['Bengaluru office','Other']
+};
+function SEED_FOR(){ return localeOf()==='in' ? SEED_IN : SEED_JP; }
+/* 立替（従業員精算）かどうか。日本は「立替」、インドは "Employee Reimbursement" */
+function isReimb(v){ v=String(v==null?'':v); return v==='立替' || /reimburse/i.test(v); }
+function isNoProject(v){ v=String(v==null?'':v).trim(); return !v || v==='なし' || /^none$/i.test(v); }
 
 /* 支払方法ごとに必ず要る証憑 */
 /* 名波さん 2026-09-11:
@@ -639,7 +747,7 @@ var form = {dept:'', item:'', tate:'事前', genpon:'無'};
 /* ==================== 小物 ==================== */
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function yen(n){ return '¥' + (Number(n)||0).toLocaleString('ja-JP'); }
+function yen(n){ var v=Number(n)||0; return currency()==='INR' ? ('₹' + v.toLocaleString('en-IN')) : ('¥' + v.toLocaleString('ja-JP')); }
 function num(v){ return Number(String(v==null?'':v).replace(/[^0-9.-]/g,'')) || 0; }
 function today(){ var d=new Date(); return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate()); }
 function p2(n){ return (n<10?'0':'')+n; }
@@ -685,6 +793,7 @@ async function start(silent){
   $('gate').hidden = true;
   $('btn-signout').hidden = false;
   me.domain = (me.email.split('@')[1] || '').toLowerCase();
+  applyOrgLocale(); applyLang();
 
   // ほかの Choreia と同じで、会社の設定ファイルを探して自動でつなぐ
   busy('設定を探しています…');
@@ -775,7 +884,8 @@ async function writeFirstConfig(){
   orgConfig = {
     domain: me.domain, admin: me.email, admins: [me.email].concat(
       DEFAULT_ADMINS.filter(function(a){ return a !== String(me.email).toLowerCase(); })), adminName: me.name,
-    spreadsheetId: ssId, folderId: driveRoot || '', createdAt: new Date().toISOString()
+    spreadsheetId: ssId, folderId: driveRoot || '', createdAt: new Date().toISOString(),
+    locale: localeOf(), taxRate: LOC().taxRate, currency: LOC().currency, lang: LOC().lang
   };
   try{ await saveConfig(); }
   catch(e){ toast('設定ファイルを置けませんでした。あなたの端末でだけ動きます。', true); }
@@ -888,7 +998,7 @@ function idFromUrl(v){
   return m ? m[1] : v;
 }
 async function createSpreadsheet(){
-  var body = { properties:{title:SS_TITLE}, sheets: Object.keys(SHEETS).map(function(n){ return {properties:{title:n}}; }) };
+  var body = { properties:{title:LOC().ssTitle||SS_TITLE}, sheets: Object.keys(SHEETS).map(function(n){ return {properties:{title:n}}; }) };
   var r = await api(SS, {method:'POST', body:JSON.stringify(body)});
   ssId = r.spreadsheetId;
   localStorage.setItem('cb_ss_id', ssId);
@@ -942,9 +1052,9 @@ async function ensureTabs(){
 async function seedMasters(){
   var cur = await readSheet('マスタ');
   if(cur.length) return;
-  var rows=[], i=0;
-  for(var list in SEED){
-    SEED[list].forEach(function(v){ rows.push([list, v, 'TRUE', String(++i), '0', '']); });
+  var rows=[], i=0, S=SEED_FOR();
+  for(var list in S){
+    S[list].forEach(function(v){ rows.push([list, v, 'TRUE', String(++i), '0', '']); });
   }
   await api(SS+ssId+'/values/'+A1('マスタ','A2')+'?valueInputOption=RAW',
     {method:'PUT', body: JSON.stringify({values:rows})});
@@ -970,13 +1080,13 @@ async function ensureMe(){
 }
 async function ensureDriveRoot(){
   if(driveRoot) return;
-  var q = encodeURIComponent("name='Choreia 予算 証憑' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+  var q = encodeURIComponent("name='"+LOC().evRoot+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
   var s = await api('https://www.googleapis.com/drive/v3/files?q='+q+
     '&corpora=allDrives&includeItemsFromAllDrives=true&supportsAllDrives=true&fields=files(id,name)');
   if(s.files && s.files.length){ driveRoot = s.files[0].id; }
   else {
     var f = await api('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true',
-      {method:'POST', body: JSON.stringify({name:'Choreia 予算 証憑', mimeType:'application/vnd.google-apps.folder'})});
+      {method:'POST', body: JSON.stringify({name:LOC().evRoot, mimeType:'application/vnd.google-apps.folder'})});
     driveRoot = f.id;
   }
   localStorage.setItem('cb_drive_id', driveRoot);
@@ -1049,9 +1159,9 @@ async function boot(){
 }
 /* 選択肢をアプリから直接入れる。書き込み役の用意処理に頼らない確実な道。 */
 async function seedFromApp(onProgress){
-  var rows = [], i = 0;
-  for(var list in SEED){
-    SEED[list].forEach(function(v){
+  var rows = [], i = 0, S = SEED_FOR();
+  for(var list in S){
+    S[list].forEach(function(v){
       rows.push({'リスト':list, '値':v, '有効':'TRUE', '並び':String(++i), '使用回数':'0', '最終使用':''});
     });
   }
@@ -1187,7 +1297,7 @@ function renderFiles(){
     return '<span style="display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line2);border-radius:7px;padding:3px 8px;font-size:.78rem">'+
       esc(f.file.name)+
       '<select data-fi="'+i+'" style="width:auto;padding:2px 6px;font-size:.75rem">'+
-      EV_TYPES.map(function(t){ return '<option'+(f.type===t?' selected':'')+'>'+t+'</option>'; }).join('')+
+      EV_TYPES.map(function(t){ return '<option value="'+esc(t)+'"'+(f.type===t?' selected':'')+'>'+esc(tx(t))+'</option>'; }).join('')+
       '</select></span>';
   }).join('');
   box.onchange = function(e){
@@ -1250,7 +1360,7 @@ function nextId(){
 }
 /* 事業ごとの必要証憑。設定ファイルで足せる。 */
 function projectEvidence(p){
-  if(!p || p==='なし') return [];
+  if(isNoProject(p)) return [];
   var m = (orgConfig && orgConfig.projectEvidence) || {};
   return m[p] || [];
 }
@@ -1264,7 +1374,7 @@ function hasEither(e){
 function evMissing(e){
   var miss = evNeeded(e).filter(function(t){ return String(e[t]||'').toUpperCase()!=='TRUE'; });
   if(!hasEither(e) && miss.indexOf('請求書')<0 && miss.indexOf('領収書')<0){
-    miss.unshift(String(e['支払方法'])==='立替' ? '領収書' : '請求書');
+    miss.unshift(isReimb(e['支払方法']) ? '領収書' : '請求書');
   }
   return miss;
 }
@@ -1275,7 +1385,7 @@ function journalMissing(e){
   if(!num(e['税込'])) m.push('税込金額');
   if(!e['支払方法']) m.push('支払方法');
   if(!hasEither(e)) m.push('請求書か領収書');
-  if(!e['インボイスNo'] && String(e['支払方法'])!=='立替') m.push('インボイスNo');
+  if(!e['インボイスNo'] && !isReimb(e['支払方法'])) m.push('インボイスNo');
   return m;
 }
 function endOfNextMonth(from){
@@ -1293,22 +1403,22 @@ function fmtDate(d){ return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getD
 /* 支払（または精算）の予定日。名波さんの締めルールから出す。 */
 function dueOf(e){
   var base = e['検収日'] || e['発注日'] || e['記入日時'];
-  if(String(e['支払方法'])==='立替') return fmtDate(nthOfNextMonth(base, DEADLINE.refundDay));
+  if(isReimb(e['支払方法'])) return fmtDate(nthOfNextMonth(base, DEADLINE.refundDay));
   return fmtDate(endOfNextMonth(base));
 }
 /* 証憑を出す期限。請求書は毎月10日、立替の領収書は翌月1日。 */
 function submitDueOf(e){
   var base = e['検収日'] || e['発注日'] || e['記入日時'];
-  if(String(e['支払方法'])==='立替') return fmtDate(nthOfNextMonth(base, DEADLINE.receiptDay));
+  if(isReimb(e['支払方法'])) return fmtDate(nthOfNextMonth(base, DEADLINE.receiptDay));
   return fmtDate(nthOfNextMonth(base, DEADLINE.invoiceDay));
 }
 function updateRoute(){
   var g = num($('f-gross').value);
   var pill=$('pres-pill'), bar=$('routebar');
-  if(g >= PRES_LIMIT){ pill.textContent='必要になります'; pill.className='pill p-bad'; bar.classList.add('hot'); }
-  else { pill.textContent='今回は不要'; pill.className='pill p-mute'; bar.classList.remove('hot'); }
+  if(g >= presLimit()){ pill.textContent=tx('必要になります'); pill.className='pill p-bad'; bar.classList.add('hot'); }
+  else { pill.textContent=tx('今回は不要'); pill.className='pill p-mute'; bar.classList.remove('hot'); }
   var need = evNeeded({'支払方法':$('f-pay').value, '税込':g, '事業':$('f-project').value});
-  $('hint-evidence').textContent = need.length ? ('この条件だと ' + need.join('・') + ' が要ります。あとから足せます。') : '見積書・請求書など。あとから足せます。';
+  $('hint-evidence').textContent = need.length ? (tx('この条件だと ') + need.map(tx).join(isEn()?', ':'・') + tx(' が要ります。あとから足せます。')) : tx('見積書・請求書など。あとから足せます。');
 }
 async function submitEntry(asDraft){
   var err = [];
@@ -1319,13 +1429,13 @@ async function submitEntry(asDraft){
   if(!gross) err.push('金額（税込）');
   if(!form.dept) err.push('費用負担部門');
   if(err.length && !asDraft){
-    $('form-err').innerHTML = '<div class="err">'+esc(err.join('・'))+' が空です。埋めてから出してください。</div>';
+    $('form-err').innerHTML = '<div class="err">'+esc(err.map(tx).join(isEn()?', ':'・'))+' '+tx('が空です。埋めてから出してください。')+'</div>';
     $('form-err').scrollIntoView({behavior:'smooth', block:'center'});
     return;
   }
   $('form-err').innerHTML='';
   var btn = asDraft ? $('btn-draft') : $('btn-submit');
-  btn.disabled = true; btn.textContent = '保存中…';
+  btn.disabled = true; btn.textContent = tx('保存中…');
   try{
     if(!gross) gross = Math.floor(net*(1+TAX));
     if(!net) net = Math.round(gross/(1+TAX));
@@ -1343,11 +1453,11 @@ async function submitEntry(asDraft){
     var e = {
       id:id, '記入日時':nowStr(), '記入者メール':me.email, '記入者':me.name,
       '状態': asDraft ? ST.DRAFT : ST.WAIT,
-      '種別': pay==='立替' ? ('立替'+form.tate) : '購入',
+      '種別': isReimb(pay) ? ('立替'+form.tate) : '購入',
       '部門':form.dept, '項目':form.item, '品名':name, '購入理由':why,
       '購入先':$('f-vendor').value.trim(), '税抜':net, '税込':gross, '支払方法':pay,
-      '立替区分': pay==='立替' ? form.tate : '',
-      '事業': $('f-project').value==='なし' ? '' : $('f-project').value,
+      '立替区分': isReimb(pay) ? form.tate : '',
+      '事業': isNoProject($('f-project').value) ? '' : $('f-project').value,
       '検収日': $('f-accepted').value, '証憑フォルダ': folder ? folder.webViewLink : '',
       '発注日': $('f-order').value, '納品予定日': $('f-plan').value,
       '納品先': $('f-deliver').value.trim(), 'インボイスNo': $('f-invoice').value.trim(),
@@ -1365,13 +1475,13 @@ async function submitEntry(asDraft){
       if(form.item) await bumpMaster('項目', form.item);
     }catch(e2){}
     await logAudit(asDraft?'下書き保存':'記入', id, '', name+' '+yen(gross));
-    toast(asDraft ? '下書きで保存しました' : id + ' をチェックに出しました');
+    toast(asDraft ? tx('下書きで保存しました') : id + ' ' + tx('をチェックに出しました'));
     clearForm();
     await loadAll(); renderAll();
   }catch(ex){
-    $('form-err').innerHTML = '<div class="err">保存できませんでした。<br><span class="mono">'+esc(ex.message)+'</span></div>';
+    $('form-err').innerHTML = '<div class="err">'+tx('保存できませんでした。')+'<br><span class="mono">'+esc(ex.message)+'</span></div>';
   }finally{
-    btn.disabled=false; btn.textContent = asDraft ? '下書きで保存' : 'チェックに出す';
+    btn.disabled=false; btn.textContent = asDraft ? tx('下書きで保存') : tx('チェックに出す');
   }
 }
 function clearForm(){
@@ -1384,17 +1494,17 @@ function clearForm(){
 /* ==================== わたしの記入 ==================== */
 function statusPill(e){
   var s = e['状態'];
-  if(s===ST.REJ) return '<span class="pill p-bad">差し戻し</span>';
-  if(s===ST.DRAFT) return '<span class="pill p-mute">下書き</span>';
-  if(s===ST.WAIT) return '<span class="pill p-warn">チェック待ち</span>';
-  if(s===ST.PRES) return '<span class="pill p-warn">社長待ち</span>';
-  if(s===ST.WD) return '<span class="pill p-mute">取り下げ</span>';
-  if(s===ST.PAID) return '<span class="pill p-ok">支払済 '+md(e['支払日'])+'</span>';
+  if(s===ST.REJ) return '<span class="pill p-bad">'+tx('差し戻し')+'</span>';
+  if(s===ST.DRAFT) return '<span class="pill p-mute">'+tx('下書き')+'</span>';
+  if(s===ST.WAIT) return '<span class="pill p-warn">'+tx('チェック待ち')+'</span>';
+  if(s===ST.PRES) return '<span class="pill p-warn">'+tx('社長待ち')+'</span>';
+  if(s===ST.WD) return '<span class="pill p-mute">'+tx('取り下げ')+'</span>';
+  if(s===ST.PAID) return '<span class="pill p-ok">'+tx('支払済')+' '+md(e['支払日'])+'</span>';
   if(s===ST.OK){
     if(String(e['種別']).indexOf('立替')===0 && String(e['領収書']).toUpperCase()!=='TRUE')
-      return '<span class="pill p-info">領収書待ち</span>';
-    if(String(e['種別']).indexOf('立替')===0) return '<span class="pill p-info">返金待ち'+(e['返金日']?' '+md(e['返金日']):'')+'</span>';
-    return '<span class="pill p-info">支払待ち'+(e['支払日']?' '+md(e['支払日']):'')+'</span>';
+      return '<span class="pill p-info">'+tx('領収書待ち')+'</span>';
+    if(String(e['種別']).indexOf('立替')===0) return '<span class="pill p-info">'+tx('返金待ち')+(e['返金日']?' '+md(e['返金日']):'')+'</span>';
+    return '<span class="pill p-info">'+tx('支払待ち')+(e['支払日']?' '+md(e['支払日']):'')+'</span>';
   }
   return '<span class="pill p-mute">'+esc(s||'')+'</span>';
 }
@@ -1405,30 +1515,30 @@ function renderMy(){
     return e['状態']===ST.REJ || (e['状態']!==ST.DRAFT && e['状態']!==ST.WD && evMissing(e).length);
   });
   $('my-alert').innerHTML = probs.length ?
-    '<div class="alertbar"><span class="pill p-bad">'+probs.length+'件</span><span>足りないものがあります。'+
-    probs.slice(0,3).map(function(e){ return '<b>'+esc(e.id)+'</b>'; }).join('、')+
-    ' を直してください。</span><button class="btn ghost sm" data-go="gaps">見る</button></div>' : '';
-  if(!mine.length){ $('my-list').innerHTML = '<div class="empty">まだ何も出していません。下の欄から記入してください。</div>'; return; }
+    '<div class="alertbar"><span class="pill p-bad">'+probs.length+tx('件')+'</span><span>'+tx('足りないものがあります。')+' '+
+    probs.slice(0,3).map(function(e){ return '<b>'+esc(e.id)+'</b>'; }).join(isEn()?', ':'、')+
+    ' '+tx('を直してください。')+'</span><button class="btn ghost sm" data-go="gaps">'+tx('見る')+'</button></div>' : '';
+  if(!mine.length){ $('my-list').innerHTML = '<div class="empty">'+tx('まだ何も出していません。下の欄から記入してください。')+'</div>'; return; }
   var rows = mine.map(function(e){
     var miss = evMissing(e);
     var sub = [];
-    if(e['状態']===ST.REJ && e['差戻理由']) sub.push('差し戻し：'+esc(e['差戻理由']));
-    if(miss.length && e['状態']!==ST.DRAFT) sub.push(esc(miss.join('・'))+'がまだです');
+    if(e['状態']===ST.REJ && e['差戻理由']) sub.push(tx('差し戻し：')+esc(e['差戻理由']));
+    if(miss.length && e['状態']!==ST.DRAFT) sub.push(isEn() ? ('Missing: '+esc(miss.map(tx).join(', '))) : (esc(miss.join('・'))+'がまだです'));
     if(e['種別'] && e['種別']!=='購入') sub.push(esc(e['種別']));
     var act = '';
-    if(e['状態']===ST.REJ) act = '<button class="btn sm" data-edit="'+e._row+'">直して出す</button>';
-    else if(e['状態']===ST.WAIT) act = '<button class="btn ghost sm" data-wd="'+e._row+'">取り下げる</button>';
-    else if(miss.length) act = '<button class="btn sm" data-ev="'+e._row+'">証憑を上げる</button>';
-    else if(e['状態']===ST.DRAFT) act = '<button class="btn sm" data-send="'+e._row+'">出す</button>';
+    if(e['状態']===ST.REJ) act = '<button class="btn sm" data-edit="'+e._row+'">'+tx('直して出す')+'</button>';
+    else if(e['状態']===ST.WAIT) act = '<button class="btn ghost sm" data-wd="'+e._row+'">'+tx('取り下げる')+'</button>';
+    else if(miss.length) act = '<button class="btn sm" data-ev="'+e._row+'">'+tx('証憑を上げる')+'</button>';
+    else if(e['状態']===ST.DRAFT) act = '<button class="btn sm" data-send="'+e._row+'">'+tx('出す')+'</button>';
     return '<tr><td class="mono">'+esc(e.id)+'</td><td class="mono">'+md(e['記入日時'])+'</td>'+
       '<td class="name">'+esc(e['品名'])+(sub.length?'<small>'+sub.join(' ／ ')+'</small>':'')+'</td>'+
       '<td class="num">'+Number(num(e['税込'])).toLocaleString('ja-JP')+'</td><td>'+statusPill(e)+'</td><td>'+act+'</td></tr>';
   }).join('');
   $('my-list').innerHTML =
     '<div class="tablewrap" style="border:none;border-radius:0;box-shadow:none"><table>'+
-    '<thead><tr><th>No</th><th>記入日</th><th>品名</th><th>税込</th><th>いまどこ</th><th></th></tr></thead>'+
+    '<thead><tr><th>No</th><th>'+tx('記入日')+'</th><th>'+tx('品名')+'</th><th>'+tx('税込')+'</th><th>'+tx('いまどこ')+'</th><th></th></tr></thead>'+
     '<tbody>'+rows+'</tbody></table></div>'+
-    '<p class="lockline" style="padding:0 18px 14px">出したあとは直せません。チェックの前なら取り下げ、差し戻されたら直して出し直しです。</p>';
+    '<p class="lockline" style="padding:0 18px 14px">'+tx('出したあとは直せません。チェックの前なら取り下げ、差し戻されたら直して出し直しです。')+'</p>';
 }
 
 /* ==================== チェックする ==================== */
@@ -1446,7 +1556,7 @@ function renderApprove(){
   if(!list.length){ $('approve-list').innerHTML = '<div class="empty">チェック待ちはありません。</div>'; return; }
   $('approve-list').innerHTML = '<div style="display:grid;gap:14px">' + list.map(function(e){
     var need = e['状態']===ST.PRES ? '<span class="pill p-bad">社長のチェック待ち</span>'
-      : (num(e['税込'])>=PRES_LIMIT ? '<span class="pill p-warn">通すと社長へ回ります</span>' : '');
+      : (num(e['税込'])>=presLimit() ? '<span class="pill p-warn">通すと社長へ回ります</span>' : '');
     var miss = evMissing(e);
     return '<div class="card"><div class="body">'+
       '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:baseline">'+
@@ -1468,9 +1578,9 @@ function renderApprove(){
 async function doApprove(row){
   var e = DB['購入'].filter(function(x){ return x._row===row; })[0]; if(!e) return;
   var before = e['状態'];
-  if(e['状態']===ST.WAIT && num(e['税込'])>=PRES_LIMIT && me.role!=='pres' && me.role!=='acc'){
+  if(e['状態']===ST.WAIT && num(e['税込'])>=presLimit() && me.role!=='pres' && me.role!=='acc'){
     e['状態']=ST.PRES; e['チェック者']=me.name; e['チェック日時']=nowStr();
-  } else if(e['状態']===ST.WAIT && num(e['税込'])>=PRES_LIMIT){
+  } else if(e['状態']===ST.WAIT && num(e['税込'])>=presLimit()){
     e['状態']=ST.PRES; e['チェック者']=me.name; e['チェック日時']=nowStr();
   } else if(e['状態']===ST.PRES){
     e['状態']=ST.OK; e['社長承認者']=me.name; e['社長承認日時']=nowStr();
@@ -1897,22 +2007,22 @@ function evModal(row){
   var e = DB['購入'].filter(function(x){ return x._row===row; })[0]; if(!e) return;
   var need = evMissing(e);
   var bg = document.createElement('div'); bg.className='modalbg';
-  bg.innerHTML = '<div class="modal"><h3>証憑を上げる — '+esc(e.id)+'</h3><div class="body">'+
-    '<dl class="kv"><dt>品名</dt><dd>'+esc(e['品名'])+'</dd><dt>金額</dt><dd>'+yen(e['税込'])+'</dd>'+
-    '<dt>足りないもの</dt><dd>'+esc(need.join('・')||'なし')+'</dd></dl>'+
-    '<div class="field"><label for="m-file">ファイル</label><input type="file" id="m-file" multiple></div>'+
-    '<div class="field"><label for="m-type">種類</label><select id="m-type">'+
-      EV_TYPES.map(function(t){ return '<option'+(need[0]===t?' selected':'')+'>'+t+'</option>'; }).join('')+'</select></div>'+
-    '<div class="actions"><button class="btn" id="m-up">上げる</button>'+
-    '<button class="btn ghost" id="m-cancel">やめる</button></div></div></div>';
+  bg.innerHTML = '<div class="modal"><h3>'+tx('証憑を上げる')+' — '+esc(e.id)+'</h3><div class="body">'+
+    '<dl class="kv"><dt>'+tx('品名')+'</dt><dd>'+esc(e['品名'])+'</dd><dt>'+tx('金額')+'</dt><dd>'+yen(e['税込'])+'</dd>'+
+    '<dt>'+tx('足りないもの')+'</dt><dd>'+esc(need.map(tx).join(isEn()?', ':'・')||tx('なし'))+'</dd></dl>'+
+    '<div class="field"><label for="m-file">'+tx('ファイル')+'</label><input type="file" id="m-file" multiple></div>'+
+    '<div class="field"><label for="m-type">'+tx('種類')+'</label><select id="m-type">'+
+      EV_TYPES.map(function(t){ return '<option value="'+esc(t)+'"'+(need[0]===t?' selected':'')+'>'+esc(tx(t))+'</option>'; }).join('')+'</select></div>'+
+    '<div class="actions"><button class="btn" id="m-up">'+tx('上げる')+'</button>'+
+    '<button class="btn ghost" id="m-cancel">'+tx('やめる')+'</button></div></div></div>';
   document.body.appendChild(bg);
   bg.querySelector('#m-cancel').onclick = function(){ bg.remove(); };
   bg.onclick = function(ev){ if(ev.target===bg) bg.remove(); };
   bg.querySelector('#m-up').onclick = async function(){
     var files = bg.querySelector('#m-file').files;
-    if(!files.length){ toast('ファイルを選んでください', true); return; }
+    if(!files.length){ toast(tx('ファイルを選んでください'), true); return; }
     var type = bg.querySelector('#m-type').value;
-    this.disabled = true; this.textContent='上げています…';
+    this.disabled = true; this.textContent=tx('上げています…');
     try{
       var folderId = null;
       if(e['証憑フォルダ']){ folderId = idFromUrl(e['証憑フォルダ']); }
@@ -1921,10 +2031,10 @@ function evModal(row){
       e[type]='TRUE'; e['更新日時']=nowStr(); e['更新者']=me.name;
       await saveRow('購入', e);
       await logAudit('証憑追加', e.id, '', type);
-      toast(type+'を上げました');
+      toast(tx(type)+tx('を上げました'));
       bg.remove();
       await loadAll(); renderAll();
-    }catch(ex){ toast('上げられませんでした：'+ex.message, true); this.disabled=false; this.textContent='上げる'; }
+    }catch(ex){ toast(tx('上げられませんでした：')+ex.message, true); this.disabled=false; this.textContent=tx('上げる'); }
   };
 }
 
@@ -2228,7 +2338,7 @@ function setTab(name){
   });
 }
 function applyRole(){
-  var roleName = {user:'一般ユーザ', mgr:'課長', acc:'経理', pres:'社長'};
+  var roleName = {user:tx('一般ユーザ'), mgr:tx('課長'), acc:tx('経理'), pres:tx('社長')};
   $('whoami').hidden = false;
   $('whoami').innerHTML = esc(me.name) + '　<b>' + esc(roleName[me.role]||me.role) + '</b>' +
     (me.dept ? '　' + esc(me.dept) : '');
@@ -2245,6 +2355,7 @@ function applyRole(){
   if(!cur && first) setTab(first.dataset.t);
 }
 function renderAll(){
+  applyOrgLocale(); applyLang();
   applyRole();
   chips($('ch-dept'), '部門', 'dept');
   chips($('ch-item'), '項目', 'item');
@@ -2283,6 +2394,8 @@ function wire(){
 
   $('btn-signin').onclick = function(){ if(tokenClient) tokenClient.requestAccessToken(); };
   $('btn-signout').onclick = signOut;
+  $('btn-lang').onclick = toggleLang;
+  applyLang();
 
   $('btn-create').onclick = async function(){
     this.disabled=true; this.textContent='作っています…';
@@ -2320,7 +2433,7 @@ function wire(){
     updateRoute();
   });
   $('f-pay').addEventListener('change', function(){
-    $('tatebox').hidden = this.value !== '立替';
+    $('tatebox').hidden = !isReimb(this.value);
     updateRoute();
   });
   $('f-project').addEventListener('change', updateRoute);
@@ -2421,7 +2534,7 @@ function reopen(row){
   $('f-project').value = e['事業'] || 'なし'; $('f-accepted').value = ymd(e['検収日']);
   form.dept = e['部門']; form.item = e['項目'];
   chips($('ch-dept'),'部門','dept'); chips($('ch-item'),'項目','item');
-  $('tatebox').hidden = $('f-pay').value !== '立替';
+  $('tatebox').hidden = !isReimb($('f-pay').value);
   updateRoute();
   $('f-name').scrollIntoView({behavior:'smooth', block:'center'});
   toast('内容を下の欄に写しました。直して出し直してください。');
