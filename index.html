@@ -192,6 +192,14 @@
   .card > h3 .sub{font-family:"Noto Sans JP",sans-serif; font-weight:400; color:var(--muted); font-size:.82em}
   svg{display:block; max-width:100%; overflow:visible}
 
+  .taxbox{background:var(--panel2); border:1px solid var(--line); border-radius:10px;
+    padding:12px 15px; margin-top:4px; font-size:.85rem}
+  .taxbox dl{display:grid; grid-template-columns:1fr auto; gap:5px 16px; margin:0}
+  .taxbox dt{color:var(--sub)}
+  .taxbox dd{margin:0; font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; text-align:right}
+  .taxbox .pay{border-top:1px solid var(--line2); padding-top:5px; margin-top:3px; font-weight:700}
+  .taxbox .pay dd{color:var(--accent-deep)}
+
   .tatebox{background:var(--info-soft); border:1px solid var(--info); border-radius:11px; padding:14px 16px; margin-top:4px}
 
   .note{background:var(--panel); border-left:3px solid var(--accent); border-radius:0 9px 9px 0;
@@ -383,6 +391,30 @@
                 <div class="hint" id="hint-net">10%で自動計算。違うときは直してください。</div>
               </div>
             </div>
+
+            <!-- インド拠点だけ。GSTの税率とTDS（源泉徴収）。 -->
+            <div id="inbox" hidden>
+              <div class="row2">
+                <div class="field">
+                  <label for="f-gst">GST rate</label>
+                  <select id="f-gst"></select>
+                  <div class="hint">Tax rate shown on the invoice.</div>
+                </div>
+                <div class="field">
+                  <label for="f-tds">TDS rate</label>
+                  <select id="f-tds"></select>
+                  <div class="hint">Withheld from the payment and paid to the tax authority.
+                    Calculated on the amount excluding GST.</div>
+                </div>
+              </div>
+              <div class="field">
+                <label for="f-hsn">HSN / SAC code</label>
+                <input type="text" id="f-hsn" list="dl-hsn" placeholder="e.g. 8471">
+                <datalist id="dl-hsn"></datalist>
+              </div>
+              <div class="taxbox" id="taxbox"></div>
+            </div>
+
             <div class="field">
               <label>費用負担部門<span class="req">必須</span></label>
               <div class="chips" id="ch-dept"></div>
@@ -593,6 +625,11 @@ var SS_TITLE = 'Choreia 予算 データ';
 var TAX = 0.1;
 /* 拠点ごとの既定。インド拠点（m2-labo.in）は設定ファイルもシートも別になる（ドメインで見つける仕組みのため）。
    税率・通貨・言語は設定ファイル(taxRate/currency/lang/locale)で上書きできる。 */
+/* インドの税。GSTは請求書の税率、TDSは源泉徴収。
+   TDSは税抜（GSTを含まない額）にかかる。Ishitaさん確認 2026-09-15。 */
+var GST_RATES = [0, 5, 12, 18, 28];
+var TDS_RATES = [0, 1, 2, 10, 20, 30];
+
 var LOCALES = {
   jp: {taxRate:0.10, currency:'JPY', lang:'ja', ssTitle:'Choreia 予算 データ',   evRoot:'Choreia 予算 証憑'},
   in: {taxRate:0.18, currency:'INR', lang:'en', ssTitle:'Choreia Budget Data', evRoot:'Choreia Budget Evidence'}
@@ -682,15 +719,42 @@ function applyLang(){
   var rate = Math.round(TAX*100);
   if($('hint-net')) $('hint-net').textContent = en ? ('Automatically calculated at '+rate+'%. Please correct if it is different.') : (rate+'%で自動計算。違うときは直してください。');
   if($('btn-lang')) $('btn-lang').textContent = en ? '日本語' : 'English';
-  if($('f-invoice')) $('f-invoice').placeholder = 'T1234567890123';
+  var IN = localeOf()==='in';
+  if($('f-invoice')){
+    $('f-invoice').placeholder = IN ? '22AAAAA0000A1Z5' : 'T1234567890123';
+    var lab = document.querySelector('label[for="f-invoice"]');
+    if(lab) lab.textContent = IN ? 'GSTIN' : (en ? 'Invoice No.' : 'インボイスNo');
+    var h = $('f-invoice').nextElementSibling;
+    while(h && !h.classList.contains('hint')) h = h.nextElementSibling;
+    if(h && IN) h.textContent = 'The vendor registration number on the invoice. Leave blank if not shown.';
+  }
+  if($('inbox')){
+    $('inbox').hidden = !IN;
+    if(IN && $('f-gst') && !$('f-gst').options.length){
+      $('f-gst').innerHTML = GST_RATES.map(function(r){
+        return '<option value="'+r+'"'+(r===18?' selected':'')+'>'+r+'%</option>'; }).join('');
+      $('f-tds').innerHTML = TDS_RATES.map(function(r){
+        return '<option value="'+r+'">'+(r===0?'None':r+'%')+'</option>'; }).join('');
+    }
+  }
+  if(IN){
+    var lg = document.querySelector('label[for="f-gross"]');
+    if(lg) lg.innerHTML = 'Amount (Incl. Tax)';
+    var ln = document.querySelector('label[for="f-net"]');
+    if(ln) ln.innerHTML = 'Amount (Excl. Tax)<span class="req">Required</span>';
+    if($('hint-net')) $('hint-net').textContent = 'The taxable value on the invoice. GST and TDS are calculated from this.';
+    var hg = $('f-gross') && $('f-gross').nextElementSibling;
+    if(hg && hg.classList.contains('hint')) hg.textContent = 'Calculated from the taxable value and the GST rate.';
+  }
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-15 v14';
-var SCHEMA_VERSION = 2;
+var BUILD = '2026-09-15 v15';
+var SCHEMA_VERSION = 3;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
-           'インボイスNo','税抜','税込','納品先','支払方法','立替区分','事業','検収日','納品予定日',
+           'インボイスNo','税抜','GST率','税込','TDS率','TDS額','支払額','HSNコード',
+           '納品先','支払方法','立替区分','事業','検収日','納品予定日',
            '支払期限','支払日','返金日','原本郵送','備考','証憑フォルダ',
            '見積書','発注書','納品書','請求書','領収書','振込証憑','その他',
            'チェック者','チェック日時','社長承認者','社長承認日時','差戻理由','更新日時','更新者'],
@@ -1237,7 +1301,7 @@ function chips(el, list, key){
   var h = top.map(function(v){
     return '<button type="button" class="chip" aria-pressed="'+(form[key]===v?'true':'false')+'" data-v="'+esc(v)+'">'+esc(v)+'</button>';
   }).join('');
-  h += '<button type="button" class="chip more" data-more="1">ほかを探す</button>';
+  h += '<button type="button" class="chip more" data-more="1">'+(isEn()?'Search others':'ほかを探す')+'</button>';
   el.innerHTML = h;
   el.onclick = function(e){
     var b = e.target.closest('button'); if(!b) return;
@@ -1412,6 +1476,28 @@ function submitDueOf(e){
   if(isReimb(e['支払方法'])) return fmtDate(nthOfNextMonth(base, DEADLINE.receiptDay));
   return fmtDate(nthOfNextMonth(base, DEADLINE.invoiceDay));
 }
+/* インドの税の計算。税抜を起点に、GSTで請求額、TDSは税抜にかかる。 */
+function recalcIN(){
+  if(localeOf() !== 'in') return;
+  var net = num($('f-net').value);
+  var gst = num($('f-gst') ? $('f-gst').value : 0);
+  var tds = num($('f-tds') ? $('f-tds').value : 0);
+  if(!net){ if($('taxbox')) $('taxbox').innerHTML = ''; return; }
+  var gstAmt = Math.round(net * gst / 100);
+  var gross  = net + gstAmt;
+  var tdsAmt = Math.round(net * tds / 100);
+  var payable = gross - tdsAmt;
+  $('f-gross').value = gross.toLocaleString('en-IN');
+  $('taxbox').innerHTML =
+    '<dl>' +
+    '<dt>Taxable value</dt><dd>' + yen(net) + '</dd>' +
+    '<dt>GST ' + gst + '%</dt><dd>' + yen(gstAmt) + '</dd>' +
+    '<dt>Invoice total</dt><dd>' + yen(gross) + '</dd>' +
+    (tds ? '<dt>TDS ' + tds + '% (on taxable value)</dt><dd>-' + yen(tdsAmt) + '</dd>' : '') +
+    '<div class="pay" style="display:contents"><dt>Pay to vendor</dt><dd>' + yen(payable) + '</dd></div>' +
+    (tds ? '<dt>Deposit with tax authority</dt><dd>' + yen(tdsAmt) + '</dd>' : '') +
+    '</dl>';
+}
 function updateRoute(){
   var g = num($('f-gross').value);
   var pill=$('pres-pill'), bar=$('routebar');
@@ -1461,6 +1547,11 @@ async function submitEntry(asDraft){
       '検収日': $('f-accepted').value, '証憑フォルダ': folder ? folder.webViewLink : '',
       '発注日': $('f-order').value, '納品予定日': $('f-plan').value,
       '納品先': $('f-deliver').value.trim(), 'インボイスNo': $('f-invoice').value.trim(),
+      'GST率': localeOf()==='in' ? num($('f-gst').value) : '',
+      'TDS率': localeOf()==='in' ? num($('f-tds').value) : '',
+      'TDS額': localeOf()==='in' ? Math.round(net * num($('f-tds').value) / 100) : '',
+      '支払額': localeOf()==='in' ? (gross - Math.round(net * num($('f-tds').value) / 100)) : '',
+      'HSNコード': localeOf()==='in' ? $('f-hsn').value.trim() : '',
       '原本郵送': form.genpon || '無',
       '見積書':flags['見積書']||'', '発注書':flags['発注書']||'', '納品書':flags['納品書']||'',
       '請求書':flags['請求書']||'', '領収書':flags['領収書']||'', '振込証憑':flags['振込証憑']||'',
@@ -1485,7 +1576,7 @@ async function submitEntry(asDraft){
   }
 }
 function clearForm(){
-  ['f-name','f-why','f-net','f-gross','f-vendor','f-accepted','f-order','f-plan','f-deliver','f-invoice']
+  ['f-name','f-why','f-net','f-gross','f-vendor','f-accepted','f-order','f-plan','f-deliver','f-invoice','f-hsn']
     .forEach(function(i){ if($(i)) $(i).value=''; });
   pendingFiles=[]; $('f-files').value=''; renderFiles(); form.item='';
   chips($('ch-item'),'項目','item'); updateRoute();
@@ -2365,15 +2456,17 @@ function renderAll(){
   var projs = mvals('事業').map(function(m){ return m['値']; });
   if($('f-project').options.length !== projs.length)
     $('f-project').innerHTML = projs.map(function(v){ return '<option>'+esc(v)+'</option>'; }).join('');
-  var vendors = {}, delivers = {}, invoices = {};
+  var vendors = {}, delivers = {}, invoices = {}, hsns = {};
   DB['購入'].forEach(function(e){
     if(e['購入先']) vendors[e['購入先']]=1;
     if(e['納品先']) delivers[e['納品先']]=1;
     if(e['インボイスNo']) invoices[e['インボイスNo']] = e['購入先'] || '';
+    if(e['HSNコード']) hsns[e['HSNコード']] = 1;
   });
   var opts = function(o){ return Object.keys(o).map(function(v){ return '<option value="'+esc(v)+'">'; }).join(''); };
   $('dl-vendor').innerHTML = opts(vendors);
   $('dl-deliver').innerHTML = opts(delivers);
+  if($('dl-hsn')) $('dl-hsn').innerHTML = opts(hsns);
   $('dl-invoice').innerHTML = Object.keys(invoices).map(function(v){
     return '<option value="'+esc(v)+'">'+esc(invoices[v])+'</option>'; }).join('');
   renderMy();
@@ -2423,7 +2516,8 @@ function wire(){
   $('f-net').addEventListener('change', function(){
     var v = num(this.value); if(!v) return;
     this.value = v.toLocaleString('ja-JP');
-    if(!num($('f-gross').value)) $('f-gross').value = Math.floor(v*(1+TAX)).toLocaleString('ja-JP');
+    if(localeOf()==='in'){ recalcIN(); }
+    else if(!num($('f-gross').value)) $('f-gross').value = Math.floor(v*(1+TAX)).toLocaleString('ja-JP');
     updateRoute();
   });
   $('f-gross').addEventListener('change', function(){
@@ -2437,6 +2531,8 @@ function wire(){
     updateRoute();
   });
   $('f-project').addEventListener('change', updateRoute);
+  if($('f-gst')) $('f-gst').addEventListener('change', function(){ recalcIN(); updateRoute(); });
+  if($('f-tds')) $('f-tds').addEventListener('change', function(){ recalcIN(); updateRoute(); });
   $('ch-genpon').onclick = function(e){
     var b = e.target.closest('button'); if(!b) return;
     form.genpon = b.dataset.v;
