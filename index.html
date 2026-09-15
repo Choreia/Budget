@@ -591,7 +591,7 @@ var DOMAIN = localStorage.getItem('cb_domain') || 'm2-labo.jp';
 var SS_TITLE = 'Choreia 予算 データ';
 var TAX = 0.1;
 
-var BUILD = '2026-09-14 v12';
+var BUILD = '2026-09-15 v13';
 var SCHEMA_VERSION = 2;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -710,6 +710,7 @@ var CONFIG_FILENAME = 'choreia-budget-config.json';
 var DEFAULT_ADMINS = ['r.yasukouchi@m2-labo.jp'];
 var CONFIG_CACHE = 'cb_config_cache';
 var orgConfig = null;
+var gasRole = null;   // 書き込み役が判断したロール。画面の表示はこれに合わせる。
 
 function cacheConfig(){
   try{ localStorage.setItem(CONFIG_CACHE, JSON.stringify(orgConfig)); }catch(e){}
@@ -996,6 +997,7 @@ async function boot(){
     if(viaGas()){
       busy('つなぎ先を確かめています…');
       var pong = await gas({action:'ping'});
+      if(pong.role){ gasRole = pong.role; me.depts = pong.depts || []; }
       if(!pong.spreadsheetId || pong.spreadsheetId !== orgConfig.spreadsheetId){
         throw new Error('書き込み役が別のスプレッドシートを見ています（'+
           (pong.spreadsheetName || pong.spreadsheetId || '不明')+'）。'+
@@ -1020,6 +1022,7 @@ async function boot(){
       }catch(e){ setTimeout(function(){ toast('選択肢を入れられませんでした：'+e.message, true); }, 1200); }
     }
     await ensureMe();
+    if(gasRole){ me.role = gasRole; }
     // 設定ファイルがまだ無ければ、経理の人が作る（2人目からは設定なしでつながる）
     if(!orgConfig && me.role === 'acc'){
       if(!driveRoot){ try{ await ensureDriveRoot(); }catch(e){} }
@@ -1356,8 +1359,11 @@ async function submitEntry(asDraft){
     };
     e['支払期限'] = dueOf(e);
     await appendRow('購入', e);
-    await bumpMaster('部門', form.dept);
-    if(form.item) await bumpMaster('項目', form.item);
+    // 使用回数の更新はおまけ。ここで失敗しても記入は成功している。
+    try{
+      await bumpMaster('部門', form.dept);
+      if(form.item) await bumpMaster('項目', form.item);
+    }catch(e2){}
     await logAudit(asDraft?'下書き保存':'記入', id, '', name+' '+yen(gross));
     toast(asDraft ? '下書きで保存しました' : id + ' をチェックに出しました');
     clearForm();
