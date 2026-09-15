@@ -691,7 +691,7 @@ var EN = {
   '購入先':'Vendor','店名・会社名':'Shop Name / Company Name',
   'インボイスNo':'Invoice No.','仕訳に要ります。請求書の登録番号です。立替なら空で構いません。':'Required for journal entries. This is the registration number on the invoice. Leave blank for employee reimbursements.',
   '支払方法':'Payment Method','立替を選ぶと、返金までこの1件で追いかけます。':'If you select "Employee Reimbursement," we will track this single case until the refund is complete.',
-  '納品先':'Delivery Location','D-BASE / M2事務所 など':'Bengaluru office / Pune',
+  '納品先':'Delivery Location','D-BASE / M2事務所 など':'Bengaluru office / Pune office / Mumbai office',
   '事業（補助事業のときだけ）':'Project (Only for subsidized projects)','事業によって必要な証憑が変わります。':'Required evidence changes depending on the project.',
   '請求書の原本は郵送されますか':'Will the original invoice be mailed?','郵送なし':'No mailing','郵送あり':'To be mailed',
   '証憑':'Evidence','見積書・請求書など。あとから足せます。':'Attach the invoice to Google Drive. You can add more later.',
@@ -887,7 +887,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-15 v24';
+var BUILD = '2026-09-15 v26';
 var SCHEMA_VERSION = 3;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -913,12 +913,12 @@ var SEED_JP = {
 };
 /* インド拠点の初期値（Ishitaさんの項目表の例をもとにした暫定。マスタ画面で直せる） */
 var SEED_IN = {
-  '部門': ['Bengaluru office','Other'],
+  '部門': ['Bengaluru office','Pune office','Mumbai office','Other'],
   '項目': ['Purchase of Goods','Rent','Utilities','Lease Fees','Communication Expenses','Office Supplies','Bank Charges','Travel Expenses',
           'Outsourcing','Development','Advertising','Freight','Vehicle','Insurance','Honorarium','Entertainment','Books & Subscriptions','Other Expenses'],
   '支払方法': ['Bank Transfer','Company Card','Auto Debit','Employee Reimbursement','International Remittance','Cash'],
   '事業': ['None'],
-  '入金部門': ['Bengaluru office','Other']
+  '入金部門': ['Bengaluru office','Pune office','Mumbai office','Other']
 };
 function SEED_FOR(){ return localeOf()==='in' ? SEED_IN : SEED_JP; }
 /* 立替（従業員精算）かどうか。日本は「立替」、インドは "Employee Reimbursement" */
@@ -1830,7 +1830,8 @@ async function doApprove(row){
 }
 async function doReject(row){
   var e = DB['購入'].filter(function(x){ return x._row===row; })[0]; if(!e) return;
-  var why = prompt('差し戻す理由を書いてください。本人に届きます。');
+  var why = prompt(T('差し戻す理由を書いてください。本人に届きます。',
+                     'Why are you sending this back? The person will see your reason.'));
   if(!why) return;
   var before = e['状態'];
   e['状態']=ST.REJ; e['差戻理由']=why; e['更新日時']=nowStr(); e['更新者']=me.name;
@@ -1879,6 +1880,7 @@ function renderIncome(){
 }
 function tile(k,v,n){ return '<div class="tile"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div><div class="n">'+esc(n)+'</div></div>'; }
 /* 件数・日数・月あたり などの言い回し。辞書では直せないのでここで分ける。 */
+function T(ja, en){ return isEn() ? en : ja; }
 function cnt(n){ return isEn() ? (n + (n===1?' item':' items')) : (n +(isEn()?' items':'件')); }
 function days(n){ return isEn() ? (n + (n===1?' day':' days')) : (n + '日'); }
 /* グラフの目盛り。日本は万、インドはk/L（ラーク）。 */
@@ -1895,11 +1897,13 @@ function evName(t){ return isEn() ? (EV_EN[t]||t) : t; }
 function evNames(a){ return a.map(evName).join(isEn()?', ':'・'); }
 
 async function addIncome(){
-  var title = prompt('入金の項目（例：やさいバス食堂 業務委託費用 9月分）'); if(!title) return;
-  var gross = prompt('税込金額'); if(gross===null) return;
-  var net = prompt('税抜金額（分からなければ空でOK）');
-  var due = prompt('振込期日（2026-09-30 の形）'); if(!due) return;
-  var dept = prompt('部門', myDepts()[0]||'その他') || 'その他';
+  var title = prompt(T('入金の項目（例：やさいバス食堂 業務委託費用 9月分）',
+                       'What is this payment for? (e.g. Service fee, September)')); if(!title) return;
+  var gross = prompt(T('税込金額', 'Amount including tax')); if(gross===null) return;
+  var net = prompt(T('税抜金額（分からなければ空でOK）',
+                     'Amount excluding tax (leave blank if you are not sure)'));
+  var due = prompt(T('振込期日（2026-09-30 の形）', 'Due date (as 2026-09-30)')); if(!due) return;
+  var dept = prompt(T('部門','Department'), myDepts()[0]||T('その他','Other')) || T('その他','Other');
   var r = {id:'I'+Date.now(), '記入日時':nowStr(), '記入者':me.name, '部門':dept, '種別':'売上',
            '項目':title, '税込':num(gross), '税抜':num(net)||Math.round(num(gross)/(1+TAX)), '振込期日':ymd(due)};
   await appendRow('入金', r);
@@ -1909,7 +1913,7 @@ async function addIncome(){
 }
 async function confirmPaid(row){
   var r = DB['入金'].filter(function(x){ return x._row===row; })[0]; if(!r) return;
-  var d = prompt('入金確認日', today()); if(!d) return;
+  var d = prompt(T('入金確認日','Date the payment was received'), today()); if(!d) return;
   r['入金確認日'] = ymd(d); r['確認者'] = me.name;
   await saveRow('入金', r);
   await logAudit('入金確認', r.id, '', r['入金確認日']);
@@ -1956,7 +1960,7 @@ function fillSelect(el, vals, first){
 }
 async function markPaid(row){
   var e = DB['購入'].filter(function(x){ return x._row===row; })[0]; if(!e) return;
-  var d = prompt('支払日', today()); if(!d) return;
+  var d = prompt(T('支払日','Date paid'), today()); if(!d) return;
   e['状態']=ST.PAID; e['支払日']=ymd(d); e['更新日時']=nowStr(); e['更新者']=me.name;
   await saveRow('購入', e);
   await logAudit('支払', e.id, ST.OK, e['支払日']);
@@ -2007,12 +2011,16 @@ function renderAlloc(){
   var nb = $('btn-alloc-new'); if(nb) nb.onclick = addAlloc;
 }
 async function addAlloc(){
-  var key = prompt('品名に入っている言葉（例：ChatGPT）'); if(!key) return;
-  var method = prompt('分け方の名前（人数で割る／比率を決める／従事時間で割る／面積で割る）', '人数で割る') || '比率';
+  var key = prompt(T('品名に入っている言葉（例：ChatGPT）',
+                     'A word that appears in the item name (e.g. ChatGPT)')); if(!key) return;
+  var method = prompt(T('分け方の名前（人数で割る／比率を決める／従事時間で割る／面積で割る）',
+                        'Name of the method (headcount / ratio / hours worked / floor area)'),
+                      T('人数で割る','Split by headcount')) || T('比率','Ratio');
   var depts = mvals('部門').map(function(m){ return m['値']; });
   var rows = [];
   for(var i=0;i<depts.length;i++){
-    var w = prompt(depts[i] + ' の重み（使わない課は空のまま）');
+    var w = prompt(depts[i] + T(' の重み（使わない課は空のまま）',
+                                ' weight (leave blank for departments not involved)'));
     if(w===null) break;
     if(num(w)>0) rows.push({id:'A'+Date.now()+i, 'キーワード':key, '分け方':method, '部門':depts[i],
       '重み':num(w), '有効':'TRUE', '更新者':me.name, '更新日時':nowStr()});
@@ -2024,7 +2032,8 @@ async function addAlloc(){
   await loadAll(); renderAll();
 }
 async function delAlloc(key){
-  if(!confirm('「'+key+'」の分け方をやめますか。過去の集計は変わりません。')) return;
+  if(!confirm(T('「'+key+'」の分け方をやめますか。過去の集計は変わりません。',
+                'Stop the rule for "'+key+'"? Past figures do not change.'))) return;
   var rows = DB['按分'].filter(function(a){ return a['キーワード']===key; });
   for(var i=0;i<rows.length;i++){ rows[i]['有効']='FALSE'; await saveRow('按分', rows[i]); }
   await logAudit('按分ルール停止', key, 'TRUE', 'FALSE');
@@ -2325,7 +2334,8 @@ function renderMaster(){
     '<p class="lockline">止めても過去のデータは残ります。新しい記入の選択肢に出なくなるだけです。</p>';
   var b = $('btn-stop-stale');
   if(b) b.onclick = async function(){
-    if(!confirm(stale.length+'件を止めます。よろしいですか。')) return;
+    if(!confirm(T(stale.length+'件を止めます。よろしいですか。',
+                  'Stop '+stale.length+' options. Are you sure?'))) return;
     for(var i=0;i<stale.length;i++){ stale[i]['有効']='FALSE'; await saveRow('マスタ', stale[i]); }
     await logAudit('マスタ一括停止', list, '', cnt(stale.length));
     toast(stale.length+'件を止めました');
@@ -2393,7 +2403,7 @@ function renderAdmins(){
   };
 }
 async function removeAdmin(email){
-  if(!confirm(email + ' を管理者から外しますか。')) return;
+  if(!confirm(T(email+' を管理者から外しますか。', 'Remove '+email+' from the admins?'))) return;
   orgConfig.admins = (orgConfig.admins||[]).filter(function(a){ return String(a).toLowerCase() !== String(email).toLowerCase(); });
   await saveConfig();
   await logAudit('管理者を外した', email, '', '');
@@ -2478,7 +2488,8 @@ function wireGasBox(){
   };
   var o = $('btn-gas-off');
   if(o) o.onclick = async function(){
-    if(!confirm('書き込み役をやめると、記入する人ひとりひとりにシートの編集権限が要ります。よろしいですか。')) return;
+    if(!confirm(T('書き込み役をやめると、記入する人ひとりひとりにシートの編集権限が要ります。よろしいですか。',
+                  'Without the writer service every person needs edit access to the spreadsheet. Continue?'))) return;
     delete orgConfig.apiUrl;
     await saveConfig();
     toast('書き込み役をやめました');
@@ -2510,7 +2521,8 @@ function renderSettings(){
   if(mv) mv.onclick = async function(){
     var id = idFromUrl($('ss-move').value);
     if(!id || id.length < 20){ toast('スプレッドシートのURLを貼ってください', true); return; }
-    if(!confirm('つなぎ先を切り替えます。全員に効きます。よろしいですか。')) return;
+    if(!confirm(T('つなぎ先を切り替えます。全員に効きます。よろしいですか。',
+                  'This changes where everyone points. Continue?'))) return;
     this.disabled = true; this.textContent = '切り替えています…';
     try{
       orgConfig.spreadsheetId = id;
@@ -2810,7 +2822,7 @@ function wire(){
 }
 async function withdraw(row){
   var e = DB['購入'].filter(function(x){ return x._row===row; })[0]; if(!e) return;
-  if(!confirm(e.id+' を取り下げますか。')) return;
+  if(!confirm(T(e.id+' を取り下げますか。', 'Withdraw '+e.id+'?'))) return;
   e['状態']=ST.WD; e['更新日時']=nowStr(); e['更新者']=me.name;
   await saveRow('購入', e); await logAudit('取り下げ', e.id, ST.WAIT, ST.WD);
   toast('取り下げました'); await loadAll(); renderAll();
