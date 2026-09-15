@@ -300,6 +300,13 @@
       <div class="body">
         <h2>Choreia 予算</h2>
         <p>購入の申請から支払いまでを1画面で。入力したものは会社のスプレッドシートにそのまま入ります。</p>
+        <div class="field" id="region-pick">
+          <label>拠点 / Location</label>
+          <div class="chips" id="ch-region">
+            <button type="button" class="chip" data-r="jp">日本（m2-labo.jp）</button>
+            <button type="button" class="chip" data-r="in">India（m2-labo.in）</button>
+          </div>
+        </div>
         <button class="btn" id="btn-signin">Googleでログイン</button>
         <p class="hint" style="margin-top:14px">会社のアカウントでログインしてください。</p>
       </div>
@@ -618,7 +625,20 @@
    ============================================================ */
 
 /* ほかの Choreia アプリと共通のクライアントID（承認済みの生成元は https://choreia.github.io） */
-var CLIENT_ID = localStorage.getItem('cb_client_id') || '595564106580-hsrunbvfacmr23d2jopl462taqilip75.apps.googleusercontent.com';
+/* ログインの窓口は拠点ごとに別。
+   日本(m2-labo.jp)のものは組織内限定で作られているため、m2-labo.in のアカウントでは弾かれる。
+   インド側は m2-labo.in の組織で別に作って、ここに入れる。 */
+var CLIENT_IDS = {
+  jp: '595564106580-hsrunbvfacmr23d2jopl462taqilip75.apps.googleusercontent.com',
+  in: ''   /* ← m2-labo.in の組織で作ったクライアントIDを入れる */
+};
+var REGION_KEY = 'cb_region';
+function region(){
+  try{ var r = localStorage.getItem(REGION_KEY); if(r==='jp'||r==='in') return r; }catch(e){}
+  return 'jp';
+}
+function setRegion(r){ try{ localStorage.setItem(REGION_KEY, r); }catch(e){} }
+var CLIENT_ID = localStorage.getItem('cb_client_id') || CLIENT_IDS[region()] || CLIENT_IDS.jp;
 var SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive';
 var DOMAIN = localStorage.getItem('cb_domain') || 'm2-labo.jp';
 var SS_TITLE = 'Choreia 予算 データ';
@@ -749,7 +769,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-15 v15';
+var BUILD = '2026-09-15 v16';
 var SCHEMA_VERSION = 3;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -2485,7 +2505,30 @@ function wire(){
   TABS = Array.prototype.slice.call(document.querySelectorAll('#tabs button'));
   TABS.forEach(function(b){ b.onclick = function(){ setTab(b.dataset.t); window.scrollTo({top:0,behavior:'smooth'}); }; });
 
-  $('btn-signin').onclick = function(){ if(tokenClient) tokenClient.requestAccessToken(); };
+  (function(){
+    var box = $('ch-region'); if(!box) return;
+    var paint = function(){
+      Array.prototype.forEach.call(box.children, function(b){
+        b.setAttribute('aria-pressed', b.dataset.r===region() ? 'true':'false');
+      });
+    };
+    paint();
+    box.onclick = function(e){
+      var b = e.target.closest('button'); if(!b) return;
+      if(b.dataset.r === region()) return;
+      setRegion(b.dataset.r);
+      location.reload();   // 窓口が変わるので読み直す
+    };
+  })();
+  $('btn-signin').onclick = function(){
+    if(!CLIENT_ID){
+      toast(region()==='in'
+        ? 'India sign-in is not set up yet. Ask the admin to register the client ID.'
+        : 'ログインの窓口が設定されていません。', true);
+      return;
+    }
+    if(tokenClient) tokenClient.requestAccessToken();
+  };
   $('btn-signout').onclick = signOut;
   $('btn-lang').onclick = toggleLang;
   applyLang();
