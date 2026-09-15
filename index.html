@@ -887,7 +887,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-15 v23';
+var BUILD = '2026-09-15 v24';
 var SCHEMA_VERSION = 3;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -1018,7 +1018,13 @@ async function start(silent){
    全員がそれを見つけてつなぐ。管理者はここにメールで登録する。 */
 var CONFIG_FILENAME = 'choreia-budget-config.json';
 /* 誰が設定しても、この人たちは必ず管理者（経理ロール） */
-var DEFAULT_ADMINS = ['r.yasukouchi@m2-labo.jp'];
+/* 締め出し防止の保険。自分のドメインに合うものだけを足す。
+   （インド拠点に日本のアドレスが勝手に増えるのを防ぐ） */
+var DEFAULT_ADMINS = ['r.yasukouchi@m2-labo.jp', 'r.yasukouchi@m2-labo.in'];
+function defaultAdmins(){
+  var d = String(me.domain || '').toLowerCase();
+  return DEFAULT_ADMINS.filter(function(a){ return a.split('@')[1] === d; });
+}
 var CONFIG_CACHE = 'cb_config_cache';
 var orgConfig = null;
 var gasRole = null;   // 書き込み役が判断したロール。画面の表示はこれに合わせる。
@@ -1085,7 +1091,7 @@ async function writeFirstConfig(){
   if(orgConfig && orgConfig.spreadsheetId) return;
   orgConfig = {
     domain: me.domain, admin: me.email, admins: [me.email].concat(
-      DEFAULT_ADMINS.filter(function(a){ return a !== String(me.email).toLowerCase(); })), adminName: me.name,
+      defaultAdmins().filter(function(a){ return a !== String(me.email).toLowerCase(); })), adminName: me.name,
     spreadsheetId: ssId, folderId: driveRoot || '', createdAt: new Date().toISOString(),
     locale: localeOf(), taxRate: LOC().taxRate, currency: LOC().currency, lang: LOC().lang
   };
@@ -1094,7 +1100,7 @@ async function writeFirstConfig(){
 }
 function adminList(){
   var list = (orgConfig && (orgConfig.admins || (orgConfig.admin ? [orgConfig.admin] : []))) || [];
-  DEFAULT_ADMINS.forEach(function(a){
+  defaultAdmins().forEach(function(a){
     if(list.map(function(x){ return String(x).toLowerCase(); }).indexOf(a) < 0) list = list.concat([a]);
   });
   return list;
