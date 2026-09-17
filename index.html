@@ -184,6 +184,12 @@
   .routebar b{color:var(--ink)}
   .routebar.hot{border-color:var(--bad); background:var(--bad-soft)}
 
+  .updatebar{position:fixed; left:50%; bottom:20px; transform:translateX(-50%); z-index:65;
+    display:flex; align-items:center; gap:14px; background:var(--ink); color:var(--paper);
+    border-radius:999px; padding:9px 12px 9px 20px; font-size:.84rem; box-shadow:var(--shadow); max-width:92vw}
+  .updatebar .btn{background:var(--paper); color:var(--ink); border-color:var(--paper)}
+  .updatebar .btn:hover{background:#fff; color:var(--ink)}
+
   .alertbar{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:20px;
     background:var(--bad-soft); border:1px solid var(--bad); border-radius:11px; padding:11px 16px; font-size:.85rem; color:var(--ink)}
   .alertbar b{font-family:"IBM Plex Mono",monospace; font-weight:600}
@@ -887,7 +893,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-15 v29';
+var BUILD = '2026-09-17 v30';
 var SCHEMA_VERSION = 3;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -2921,6 +2927,33 @@ function reopen(row){
 
 /* ==================== 起動 ==================== */
 window.addEventListener('DOMContentLoaded', wire);
+
+/* 版が古いまま使われるのを防ぐ。
+   ?v=17 のようなURLを開きっぱなしにすると、その版がキャッシュされて修正が届かない。
+   起動時に本物の版を見に行き、違っていたら知らせる。 */
+async function checkBuild(){
+  try{
+    var res = await fetch(location.pathname + '?cb=' + Date.now(), {cache:'no-store'});
+    if(!res.ok) return;
+    var txt = await res.text();
+    var m = txt.match(/var BUILD = '([^']+)'/);
+    if(!m || m[1] === BUILD) return;
+    var bar = document.createElement('div');
+    bar.className = 'updatebar';
+    bar.innerHTML = '<span>' +
+      (isEn() ? 'A newer version is available (' + esc(m[1]) + '). You are on ' + esc(BUILD) + '.'
+              : '新しい版が出ています（' + esc(m[1]) + '）。いまお使いのものは ' + esc(BUILD) + ' です。') +
+      '</span><button class="btn sm" id="btn-update">' +
+      (isEn() ? 'Update now' : '最新にする') + '</button>';
+    document.body.appendChild(bar);
+    document.getElementById('btn-update').onclick = function(){
+      location.replace(location.pathname + '?r=' + Date.now());
+    };
+  }catch(e){}
+}
+setTimeout(checkBuild, 2500);
+setInterval(checkBuild, 15 * 60 * 1000);
+
 window.onGisLoad = initGIS;
 
 /* 前に戻ってきた人にログイン画面を一瞬見せない。
