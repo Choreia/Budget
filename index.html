@@ -198,6 +198,10 @@
   .card > h3 .sub{font-family:"Noto Sans JP",sans-serif; font-weight:400; color:var(--muted); font-size:.82em}
   svg{display:block; max-width:100%; overflow:visible}
 
+  .acctbox{background:var(--panel2); border:1px solid var(--line); border-radius:9px;
+    padding:9px 13px; margin-top:8px; font-size:.83rem; color:var(--sub)}
+  .acctbox b{color:var(--accent-deep)}
+
   .taxbox{background:var(--panel2); border:1px solid var(--line); border-radius:10px;
     padding:12px 15px; margin-top:4px; font-size:.85rem}
   .taxbox dl{display:grid; grid-template-columns:1fr auto; gap:5px 16px; margin:0}
@@ -433,9 +437,15 @@
               <div class="chips" id="ch-dept"></div>
             </div>
             <div class="field">
-              <label>項目（勘定科目）</label>
+              <label>項目</label>
               <div class="chips" id="ch-item"></div>
               <div class="hint">迷ったら選ばずに出せます。経理が入れます。</div>
+            </div>
+            <div class="field" id="purposebox" hidden>
+              <label>何のために使いますか<span class="req">必須</span></label>
+              <div class="chips" id="ch-purpose"></div>
+              <div class="hint" id="hint-purpose"></div>
+              <div class="acctbox" id="acctbox" hidden></div>
             </div>
             <div class="row2">
               <div class="field">
@@ -893,21 +903,57 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-17 v30';
-var SCHEMA_VERSION = 3;
+var BUILD = '2026-09-18 v31';
+var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
            'インボイスNo','税抜','GST率','税込','TDS率','TDS額','支払額','HSNコード',
            '納品先','支払方法','立替区分','事業','検収日','納品予定日',
            '支払期限','支払日','返金日','原本郵送','備考','証憑フォルダ',
            '見積書','発注書','納品書','請求書','領収書','振込証憑','その他',
+           '目的','勘定科目',
            'チェック者','チェック日時','社長承認者','社長承認日時','差戻理由','更新日時','更新者'],
   '入金': ['id','記入日時','記入者','部門','種別','項目','証憑','税込','税抜','振込期日','入金確認日','確認者','売掛入力','備考'],
   'マスタ': ['リスト','値','有効','並び','使用回数','最終使用'],
   '人': ['メール','名前','ロール','部門','上長メール'],
   '按分': ['id','キーワード','分け方','部門','重み','有効','更新者','更新日時'],
-  '履歴': ['日時','操作者','操作','対象','変更前','変更後']
+  '履歴': ['日時','操作者','操作','対象','変更前','変更後'],
+  /* 目的と部門から勘定科目を決める表。経理が直接直せるように独立したタブにする。
+     名波さんの「通信費仕訳一覧表」(2026-09-17)がもと。 */
+  '仕訳ルール': ['科目','目的','部門区分','勘定科目','有効','備考']
 };
+
+/* 記入する人が選ぶ「目的」。会計の言葉を使わない。 */
+var PURPOSES = [
+  {key:'受託開発', label:'お客さんから受注した開発に使う', hint:'例：スズキ様のAI開発受託'},
+  {key:'研究',     label:'新しいものを試している段階',      hint:'アイデア出し・技術検証・試作'},
+  {key:'本番開発', label:'製品化が決まって本番を作っている', hint:'本番コードの実装・本番環境テスト'},
+  {key:'運用',     label:'すでに動いているものの維持・運用', hint:'リリース済みのシステムの日常運用'},
+  {key:'社内業務', label:'社内の業務・デザイン用',          hint:'コード管理・業務効率化・チラシやWeb制作'}
+];
+/* 初期の仕訳ルール。科目ごとに使える目的が違う。
+   部門区分 '*' はどの部門でも同じ、'製造' と 'その他' は部門で分かれる。 */
+var SEED_RULES = [
+  ['通信費',      '受託開発', '*',      '売上原価',           'TRUE', '仕入・受託案件費用'],
+  ['通信費',      '研究',     '*',      '試験研究費',         'TRUE', '発生時に一括費用処理'],
+  ['通信費',      '本番開発', '*',      'ソフトウェア仮勘定', 'TRUE', '完成まで資産計上→稼働後振替'],
+  ['通信費',      '運用',     '製造',   '通信費(製)',         'TRUE', ''],
+  ['通信費',      '運用',     'その他', '通信費',             'TRUE', ''],
+  ['通信費',      '社内業務', '製造',   '通信費(製)',         'TRUE', ''],
+  ['通信費',      '社内業務', 'その他', '通信費',             'TRUE', '販管費'],
+  ['備品消耗品',  '受託開発', '*',      '売上原価',           'TRUE', ''],
+  ['備品消耗品',  '研究',     '*',      '試験研究費',         'TRUE', ''],
+  ['備品消耗品',  '運用',     '製造',   '備品消耗品(製)',     'TRUE', ''],
+  ['備品消耗品',  '運用',     'その他', '備品消耗品',         'TRUE', ''],
+  ['備品消耗品',  '社内業務', '製造',   '備品消耗品(製)',     'TRUE', ''],
+  ['備品消耗品',  '社内業務', 'その他', '備品消耗品',         'TRUE', ''],
+  ['外注費',      '受託開発', '*',      '売上原価',           'TRUE', ''],
+  ['外注費',      '研究',     '*',      '試験研究費',         'TRUE', ''],
+  ['外注費',      '運用',     '製造',   '外注費(製)',         'TRUE', ''],
+  ['外注費',      '運用',     'その他', '外注費',             'TRUE', ''],
+  ['外注費',      '社内業務', '製造',   '外注費(製)',         'TRUE', ''],
+  ['外注費',      '社内業務', 'その他', '外注費',             'TRUE', '']
+];
 
 var SEED_JP = {
   '部門': ['D-base','M2共通','SVL','ハード(製造原価)','事業企画(デザイン)','和泉市アグリセンター','協力隊','その他'],
@@ -915,7 +961,9 @@ var SEED_JP = {
           '外注費','開発費','広告宣伝費','荷造運賃費','車両費','保険料','謝金','接待交際費','新聞図書費','その他経費'],
   '支払方法': ['銀行振込','M2クレカ','口座振替','立替','海外送金','現金払い'],
   '事業': ['なし','スマ農R7','菊川市R7','鹿児島衛星R7','牧之原市協力隊','KAGOME','JICA','GS-India'],
-  '入金部門': ['【AT】アグリテック','和泉市アグリセンター','協力隊','その他']
+  '入金部門': ['【AT】アグリテック','和泉市アグリセンター','協力隊','その他'],
+  /* ここに入れた部門の費用は製造原価側になる（名波さん 2026-09-17：企画製造のみ） */
+  '製造部門': ['企画製造部']
 };
 /* インド拠点の初期値（Ishitaさんの項目表の例をもとにした暫定。マスタ画面で直せる） */
 var SEED_IN = {
@@ -950,7 +998,7 @@ var tokenClient=null, accessToken=null, ssId=null, driveRoot=null;
 var me = {email:'', name:'', role:'user', dept:'', manager:''};
 var DB = {'購入':[], '入金':[], 'マスタ':[], '人':[], '按分':[]};
 var pendingFiles = [];
-var form = {dept:'', item:'', tate:'事前', genpon:'無'};
+var form = {dept:'', item:'', purpose:'', tate:'事前', genpon:'無'};
 
 /* ==================== 小物 ==================== */
 function $(id){ return document.getElementById(id); }
@@ -1331,17 +1379,17 @@ async function boot(){
     }
     // まず小さいものだけ読んで画面を出す
     busy('読み込んでいます…');
-    var small = await loadSome(['マスタ','人']);
+    var small = await loadSome(['マスタ','人','仕訳ルール']);
     if(small.err) throw small.err;
     // 選択肢が空なら、用意が済んでいないということ。もう一度だけやり直す。
     if(!(DB['マスタ']||[]).length && me.role === 'acc'){
       busy('選択肢を入れています…');
       try{
         await prepare();
-        await loadSome(['マスタ','人']);
+        await loadSome(['マスタ','人','仕訳ルール']);
         if(!(DB['マスタ']||[]).length){
           await seedFromApp(function(d,t){ busy('選択肢を入れています… '+d+'/'+t); });
-          await loadSome(['マスタ','人']);
+          await loadSome(['マスタ','人','仕訳ルール']);
         }
       }catch(e){ setTimeout(function(){ toast('選択肢を入れられませんでした：'+e.message, true); }, 1200); }
     }
@@ -1352,12 +1400,16 @@ async function boot(){
       if(!driveRoot){ try{ await ensureDriveRoot(); }catch(e){} }
       try{ await writeFirstConfig(); }catch(e){}
     }
+    if(!(DB['仕訳ルール']||[]).length && me.role === 'acc'){
+      busy('仕訳ルールを入れています…');
+      try{ await seedRulesFromApp(); await loadSome(['仕訳ルール']); }catch(e){}
+    }
     $('setup').hidden = true;
     $('appmain').hidden = false;
     busy(false);
     renderAll();
     // 残りは後ろで読んで、届いたら描き直す
-    loadSome(['購入','入金','按分']).then(function(){
+    loadSome(['購入','入金','按分','仕訳ルール']).then(function(){
       renderAll();
       if(!driveRoot) ensureDriveRoot();
     });
@@ -1388,6 +1440,16 @@ async function boot(){
   }
 }
 /* 選択肢をアプリから直接入れる。書き込み役の用意処理に頼らない確実な道。 */
+/* 仕訳ルールの初期投入。空のときだけ入れる。 */
+async function seedRulesFromApp(){
+  if((DB['仕訳ルール']||[]).length) return 0;
+  var head = SHEETS['仕訳ルール'];
+  for(var i=0;i<SEED_RULES.length;i++){
+    var o = {}; head.forEach(function(h, j){ o[h] = SEED_RULES[i][j] !== undefined ? SEED_RULES[i][j] : ''; });
+    await appendRow('仕訳ルール', o);
+  }
+  return SEED_RULES.length;
+}
 async function seedFromApp(onProgress){
   var rows = [], i = 0, S = SEED_FOR();
   for(var list in S){
@@ -1428,7 +1490,7 @@ async function loadSome(names){
     return {};
   }catch(e){ return {err:e}; }
 }
-async function loadAll(){ await loadSome(['購入','入金','マスタ','人','按分']); }
+async function loadAll(){ await loadSome(['購入','入金','マスタ','人','按分','仕訳ルール']); }
 function busy(msg){
   var el = $('busy');
   if(!el){
@@ -1458,6 +1520,33 @@ function myDepts(){
   return [];
 }
 
+/* ==================== 仕訳ルール ==================== */
+/* 部門が製造原価側かどうか。マスタの「製造部門」で決まる。 */
+function isSeizoDept(dept){
+  if(!dept) return false;
+  return mvals('製造部門').some(function(m){ return m['値'] === dept; });
+}
+function rules(){
+  return (DB['仕訳ルール']||[]).filter(function(r){ return String(r['有効']).toUpperCase()!=='FALSE'; });
+}
+/* その科目で選べる目的。ルールが無い科目なら空＝欄を出さない。 */
+function purposesFor(item){
+  if(!item) return [];
+  var keys = {};
+  rules().forEach(function(r){ if(r['科目']===item) keys[r['目的']] = 1; });
+  return PURPOSES.filter(function(p){ return keys[p.key]; });
+}
+/* 科目・目的・部門から勘定科目を出す。 */
+function accountFor(item, purpose, dept){
+  if(!item || !purpose) return '';
+  var seizo = isSeizoDept(dept) ? '製造' : 'その他';
+  var hit = rules().filter(function(r){
+    return r['科目']===item && r['目的']===purpose &&
+           (r['部門区分']==='*' || r['部門区分']===seizo);
+  })[0];
+  return hit ? hit['勘定科目'] : '';
+}
+
 /* ==================== チップ ==================== */
 function chips(el, list, key){
   var vals = mvals(list).map(function(m){ return m['値']; });
@@ -1475,10 +1564,12 @@ function chips(el, list, key){
       var sel = document.createElement('select');
       sel.innerHTML = '<option value="">選んでください</option>' + vals.map(function(v){
         return '<option'+(form[key]===v?' selected':'')+'>'+esc(v)+'</option>'; }).join('');
-      sel.onchange = function(){ form[key]=sel.value; chips(el,list,key); };
+      sel.onchange = function(){ form[key]=sel.value; chips(el,list,key);
+        if(key==='item' || key==='dept') renderPurpose(); };
       el.innerHTML=''; el.appendChild(sel); sel.focus(); return;
     }
     form[key] = b.dataset.v; chips(el, list, key);
+    if(key==='item' || key==='dept') renderPurpose();
   };
 }
 
@@ -1680,6 +1771,7 @@ async function submitEntry(asDraft){
   if(!why) err.push('購入理由');
   if(!gross) err.push('金額（税込）');
   if(!form.dept) err.push('費用負担部門');
+  if(purposesFor(form.item).length && !form.purpose) err.push('何のために使うか');
   if(err.length && !asDraft){
     $('form-err').innerHTML = '<div class="err">'+esc(err.map(tx).join(isEn()?', ':'・'))+' '+tx('が空です。埋めてから出してください。')+'</div>';
     $('form-err').scrollIntoView({behavior:'smooth', block:'center'});
@@ -1711,6 +1803,7 @@ async function submitEntry(asDraft){
       '立替区分': isReimb(pay) ? form.tate : '',
       '事業': isNoProject($('f-project').value) ? '' : $('f-project').value,
       '検収日': $('f-accepted').value, '証憑フォルダ': folder ? folder.webViewLink : '',
+      '目的': form.purpose || '', '勘定科目': accountFor(form.item, form.purpose, form.dept),
       '発注日': $('f-order').value, '納品予定日': $('f-plan').value,
       '納品先': $('f-deliver').value.trim(), 'インボイスNo': $('f-invoice').value.trim(),
       'GST率': localeOf()==='in' ? num($('f-gst').value) : '',
@@ -1744,7 +1837,7 @@ async function submitEntry(asDraft){
 function clearForm(){
   ['f-name','f-why','f-net','f-gross','f-vendor','f-accepted','f-order','f-plan','f-deliver','f-invoice','f-hsn']
     .forEach(function(i){ if($(i)) $(i).value=''; });
-  pendingFiles=[]; $('f-files').value=''; renderFiles(); form.item='';
+  pendingFiles=[]; $('f-files').value=''; renderFiles(); form.item=''; form.purpose='';
   chips($('ch-item'),'項目','item'); updateRoute();
 }
 
@@ -2709,6 +2802,30 @@ function applyRole(){
   var cur = TABS.filter(function(b){ return b.getAttribute('aria-selected')==='true' && !b.hidden; })[0];
   if(!cur && first) setTab(first.dataset.t);
 }
+/* 目的の欄。科目にルートが定義されている科目でだけ出す。 */
+function renderPurpose(){
+  var box = $('purposebox'); if(!box) return;
+  var list = purposesFor(form.item);
+  if(!list.length){ box.hidden = true; form.purpose = ''; return; }
+  box.hidden = false;
+  if(form.purpose && !list.some(function(p){ return p.key===form.purpose; })) form.purpose = '';
+  $('ch-purpose').innerHTML = list.map(function(p){
+    return '<button type="button" class="chip" aria-pressed="'+(form.purpose===p.key?'true':'false')+
+      '" data-v="'+esc(p.key)+'" title="'+esc(p.hint)+'">'+esc(p.label)+'</button>';
+  }).join('');
+  $('ch-purpose').onclick = function(e){
+    var b = e.target.closest('button'); if(!b) return;
+    form.purpose = b.dataset.v;
+    renderPurpose();
+  };
+  var cur = list.filter(function(p){ return p.key===form.purpose; })[0];
+  $('hint-purpose').textContent = cur ? cur.hint : '選んでください。経理の処理がこれで決まります。';
+  var acct = accountFor(form.item, form.purpose, form.dept);
+  var ab = $('acctbox');
+  ab.hidden = !acct;
+  if(acct) ab.innerHTML = '経理の勘定科目：<b>'+esc(acct)+'</b>'+
+    (isSeizoDept(form.dept) ? '　（'+esc(form.dept)+'＝製造原価）' : '');
+}
 function renderAll(){
   applyOrgLocale(); applyLang();
   applyRole();
@@ -2733,6 +2850,7 @@ function renderAll(){
   if($('dl-hsn')) $('dl-hsn').innerHTML = opts(hsns);
   $('dl-invoice').innerHTML = Object.keys(invoices).map(function(v){
     return '<option value="'+esc(v)+'">'+esc(invoices[v])+'</option>'; }).join('');
+  renderPurpose();
   renderMy();
   renderApprove();
   renderIncome();
