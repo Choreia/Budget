@@ -569,6 +569,7 @@
           <select id="cost-dept"></select>
           <span class="spacer"></span>
           <button class="btn ghost sm" id="btn-cost-csv">CSVで出す</button>
+          <button class="btn ghost sm" id="btn-alloc-csv">按分の内訳をCSV</button>
         </div>
         <div id="cost-tiles" class="tiles"></div>
         <div class="card" style="margin-bottom:20px">
@@ -788,9 +789,11 @@ Object.assign(EN, {
   '薄い棒はまだ確定していないものです。':'Faded bars are not yet confirmed.',
   '課への按分':'Allocation across departments','分け方を足す':'Add a rule',
   'この分け方をやめる':'Stop this rule','まだ按分ルールがありません。':'No allocation rules yet.',
-  '1件の費用を複数の課で分けます。品名にキーワードが入っていると、このルールが当たります。端数は1円まで合わせて、いちばん大きい課に寄せます。台帳は元の1件のまま、証憑も1枚のままです。':
-    'Split one cost across departments. A rule applies when its keyword appears in the item name. Rounding is settled to the last unit and given to the largest share. The ledger keeps one entry and one set of evidence.',
+  '1件の費用を複数の課で分けます。当てかたは2つあります。「部門」は、その部門についた費用をまるごと分けます（例：D-base の費用を製造分とそれ以外に分ける）。「品名」は、品名にその言葉が入っている費用を分けます（例：ChatGPT を人数で分ける）。両方あたったときは品名が勝ちます。端数は1円まで合わせて、いちばん大きい課に寄せます。台帳は元の1件のまま、証憑も1枚のままです。分けた先が製造部門なら、その分だけ「（製）」の勘定科目になります。':
+    'Split one cost across departments. There are two ways to match. "Department" splits everything charged to that department (e.g. split D-base costs between manufacturing and the rest). "Item name" splits entries whose name contains a word (e.g. split ChatGPT by headcount). If both match, the item-name rule wins. Rounding is settled to the last unit and given to the largest share. The ledger keeps one entry and one set of evidence. Where a share lands on a manufacturing department, that share takes the manufacturing account.',
   '課':'Department','重み':'Weight','比率':'Share',
+  'やめました':'Stopped','原価区分':'Cost type','製造（製）':'Manufacturing',
+  '按分の内訳をCSV':'Allocation breakdown CSV',
   // 抜けているもの
   '抜けているもの':'Missing items','足りないものを自動で拾います。人が気づく必要はありません。':
     'Missing items are found automatically. Nobody has to notice them.',
@@ -903,7 +906,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-18 v31';
+var BUILD = '2026-09-18 v32';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -916,7 +919,7 @@ var SHEETS = {
   '入金': ['id','記入日時','記入者','部門','種別','項目','証憑','税込','税抜','振込期日','入金確認日','確認者','売掛入力','備考'],
   'マスタ': ['リスト','値','有効','並び','使用回数','最終使用'],
   '人': ['メール','名前','ロール','部門','上長メール'],
-  '按分': ['id','キーワード','分け方','部門','重み','有効','更新者','更新日時'],
+  '按分': ['id','キーワード','分け方','部門','重み','有効','更新者','更新日時','対象'],
   '履歴': ['日時','操作者','操作','対象','変更前','変更後'],
   /* 目的と部門から勘定科目を決める表。経理が直接直せるように独立したタブにする。
      名波さんの「通信費仕訳一覧表」(2026-09-17)がもと。 */
@@ -2084,15 +2087,30 @@ async function markPaid(row){
 }
 
 /* ==================== 按分 ==================== */
-function allocFor(e){
-  var key = null;
+/* 按分ルールは2種類ある。
+   ・部門 … その部門についた費用をまるごと分ける（例：D-base の費用を製造分とそれ以外に分ける）
+   ・品名 … 品名にその言葉が入っている費用を分ける（例：ChatGPT を人数で分ける）
+   両方あたったときは、狙いが細かい「品名」を優先する。 */
+function allocTarget(a){ return (a['対象']==='部門') ? '部門' : '品名'; }
+function allocKey(a){ return allocTarget(a)+'\u0001'+(a['キーワード']||''); }
+function allocLive(a){ return String(a['有効']).toUpperCase()!=='FALSE'; }
+function allocRuleFor(e){
+  var byItem = null, byDept = null;
   DB['按分'].forEach(function(a){
-    if(String(a['有効']).toUpperCase()==='FALSE') return;
-    if(a['キーワード'] && String(e['品名']||'').indexOf(a['キーワード'])>=0) key = a['キーワード'];
+    if(!allocLive(a) || !a['キーワード']) return;
+    if(allocTarget(a)==='部門'){
+      if(String(e['部門']||'') === a['キーワード']) byDept = allocKey(a);
+    } else {
+      if(String(e['品名']||'').indexOf(a['キーワード'])>=0) byItem = allocKey(a);
+    }
   });
+  return byItem || byDept;
+}
+function allocFor(e){
+  var key = allocRuleFor(e);
   var g = num(e['税込']);
   if(!key) return [{dept:e['部門'], amount:g}];
-  var rows = DB['按分'].filter(function(a){ return a['キーワード']===key && String(a['有効']).toUpperCase()!=='FALSE'; });
+  var rows = DB['按分'].filter(function(a){ return allocLive(a) && allocKey(a)===key; });
   var total = rows.reduce(function(s,a){ return s+num(a['重み']); }, 0);
   if(!total) return [{dept:e['部門'], amount:g}];
   var out = rows.map(function(a){ return {dept:a['部門'], amount:Math.floor(g*num(a['重み'])/total)}; });
@@ -2101,24 +2119,32 @@ function allocFor(e){
   return out;
 }
 function renderAlloc(){
-  var keys = {};
-  DB['按分'].forEach(function(a){ (keys[a['キーワード']] = keys[a['キーワード']]||[]).push(a); });
+  var keys = {}, order = [];
+  DB['按分'].forEach(function(a){
+    var k = allocKey(a);
+    if(!keys[k]){ keys[k] = []; order.push(k); }
+    keys[k].push(a);
+  });
   var h = '<p style="margin:0 0 14px;color:var(--sub);font-size:.85rem">'+
-    '1件の費用を複数の課で分けます。品名にキーワードが入っていると、このルールが当たります。'+
-    '端数は1円まで合わせて、いちばん大きい課に寄せます。台帳は元の1件のまま、証憑も1枚のままです。</p>';
-  var names = Object.keys(keys);
-  if(!names.length) h += '<div class="empty">まだ按分ルールがありません。</div>';
-  names.forEach(function(k){
+    '1件の費用を複数の課で分けます。当てかたは2つあります。「部門」は、その部門についた費用をまるごと分けます（例：D-base の費用を製造分とそれ以外に分ける）。「品名」は、品名にその言葉が入っている費用を分けます（例：ChatGPT を人数で分ける）。両方あたったときは品名が勝ちます。端数は1円まで合わせて、いちばん大きい課に寄せます。台帳は元の1件のまま、証憑も1枚のままです。分けた先が製造部門なら、その分だけ「（製）」の勘定科目になります。'+
+    '</p>';
+  if(!order.length) h += '<div class="empty">まだ按分ルールがありません。</div>';
+  order.forEach(function(k){
     var rows = keys[k], total = rows.reduce(function(s,a){ return s+num(a['重み']); },0);
-    h += '<div class="card" style="margin-bottom:12px"><div class="body">'+
+    var tgt = allocTarget(rows[0]), val = rows[0]['キーワード'];
+    var live = rows.some(allocLive);
+    h += '<div class="card" style="margin-bottom:12px'+(live?'':';opacity:.55')+'"><div class="body">'+
       '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'+
-      '<b>'+esc(k)+'</b><span class="pill p-info">'+esc(rows[0]['分け方']||'比率')+'</span>'+
-      '<button class="btn ghost sm" style="margin-left:auto" data-delalloc="'+esc(k)+'">この分け方をやめる</button></div>'+
+      '<span class="pill '+(tgt==='部門'?'p-ok':'p-info')+'">'+(tgt==='部門'?'部門':'品名')+'</span>'+
+      '<b>'+esc(val)+'</b><span class="pill p-info">'+esc(rows[0]['分け方']||'比率')+'</span>'+
+      (live ? '<button class="btn ghost sm" style="margin-left:auto" data-delalloc="'+esc(val)+'" data-alloctgt="'+esc(tgt)+'">この分け方をやめる</button>'
+            : '<span class="pill p-warn" style="margin-left:auto">やめました</span>')+'</div>'+
       '<div class="tablewrap" style="box-shadow:none;margin-top:10px"><table style="min-width:0"><thead><tr>'+
-      '<th>課</th><th>重み</th><th>比率</th></tr></thead><tbody>'+
+      '<th>課</th><th>重み</th><th>比率</th><th>原価区分</th></tr></thead><tbody>'+
       rows.map(function(a){
         return '<tr><td>'+esc(a['部門'])+'</td><td class="num">'+num(a['重み'])+'</td>'+
-          '<td class="num">'+(total? (num(a['重み'])/total*100).toFixed(1) : '0')+'%</td></tr>';
+          '<td class="num">'+(total? (num(a['重み'])/total*100).toFixed(1) : '0')+'%</td>'+
+          '<td>'+(isSeizoDept(a['部門']) ? '製造（製）' : 'その他')+'</td></tr>';
       }).join('')+'</tbody></table></div></div></div>';
   });
   h += '<div class="actions"><button class="btn" id="btn-alloc-new">分け方を足す</button></div>';
@@ -2126,32 +2152,49 @@ function renderAlloc(){
   var nb = $('btn-alloc-new'); if(nb) nb.onclick = addAlloc;
 }
 async function addAlloc(){
-  var key = prompt(T('品名に入っている言葉（例：ChatGPT）',
-                     'A word that appears in the item name (e.g. ChatGPT)')); if(!key) return;
+  var depts = mvals('部門').map(function(m){ return m['値']; });
+  var mode = prompt(T('どちらで当てますか。1＝部門（その部門についた費用をまるごと分ける）、2＝品名（品名にその言葉が入っている費用を分ける）',
+                      'Which do you match on? 1 = department (split everything charged to that department), 2 = item name (split entries whose name contains a word)'), '1');
+  if(mode===null) return;
+  var target = (String(mode).trim()==='2') ? '品名' : '部門';
+  var key;
+  if(target==='部門'){
+    if(!depts.length){ toast('部門のマスタがありません', true); return; }
+    var pick = prompt(T('分ける元の部門を番号で選んでください。\n','Pick the source department by number.\n')+
+      depts.map(function(d,i){ return (i+1)+'. '+d; }).join('\n'), '1');
+    if(pick===null) return;
+    key = depts[num(pick)-1];
+    if(!key){ toast('その番号の部門がありません', true); return; }
+  } else {
+    key = prompt(T('品名に入っている言葉（例：ChatGPT）',
+                   'A word that appears in the item name (e.g. ChatGPT)'));
+    if(!key) return;
+  }
   var method = prompt(T('分け方の名前（人数で割る／比率を決める／従事時間で割る／面積で割る）',
                         'Name of the method (headcount / ratio / hours worked / floor area)'),
-                      T('人数で割る','Split by headcount')) || T('比率','Ratio');
-  var depts = mvals('部門').map(function(m){ return m['値']; });
+                      T('比率を決める','Ratio')) || T('比率','Ratio');
   var rows = [];
   for(var i=0;i<depts.length;i++){
     var w = prompt(depts[i] + T(' の重み（使わない課は空のまま）',
                                 ' weight (leave blank for departments not involved)'));
     if(w===null) break;
     if(num(w)>0) rows.push({id:'A'+Date.now()+i, 'キーワード':key, '分け方':method, '部門':depts[i],
-      '重み':num(w), '有効':'TRUE', '更新者':me.name, '更新日時':nowStr()});
+      '重み':num(w), '有効':'TRUE', '更新者':me.name, '更新日時':nowStr(), '対象':target});
   }
   if(!rows.length){ toast('重みが入っていません', true); return; }
   for(var j=0;j<rows.length;j++) await appendRow('按分', rows[j]);
-  await logAudit('按分ルール追加', key, '', rows.map(function(r){ return r['部門']+':'+r['重み']; }).join(' '));
-  toast('分け方を保存しました。来月から自動で分かれます。');
+  await logAudit('按分ルール追加', target+'：'+key, '', rows.map(function(r){ return r['部門']+':'+r['重み']; }).join(' '));
+  toast('分け方を保存しました。いまの費用にもすぐ効きます。');
   await loadAll(); renderAll();
 }
-async function delAlloc(key){
-  if(!confirm(T('「'+key+'」の分け方をやめますか。過去の集計は変わりません。',
-                'Stop the rule for "'+key+'"? Past figures do not change.'))) return;
-  var rows = DB['按分'].filter(function(a){ return a['キーワード']===key; });
+async function delAlloc(val, tgt){
+  var key = (tgt||'品名')+'\u0001'+val;
+  var label = (tgt||'品名')+'：'+val;
+  if(!confirm(T('「'+label+'」の分け方をやめますか。これからの集計は分けずに出ます。',
+                'Stop the rule for "'+label+'"? From now on the cost stays undivided.'))) return;
+  var rows = DB['按分'].filter(function(a){ return allocKey(a)===key; });
   for(var i=0;i<rows.length;i++){ rows[i]['有効']='FALSE'; await saveRow('按分', rows[i]); }
-  await logAudit('按分ルール停止', key, 'TRUE', 'FALSE');
+  await logAudit('按分ルール停止', label, 'TRUE', 'FALSE');
   await loadAll(); renderAll();
 }
 
@@ -2981,14 +3024,31 @@ function wire(){
   };
   $('btn-cost-csv').onclick = function(){
     var dept = $('cost-dept').value;
-    var rows = [['部門','月','id','品名','項目','按分後金額','状態']];
+    var rows = [['部門','月','id','品名','項目','目的','勘定科目','原価区分','税込','按分後金額','状態']];
     DB['購入'].forEach(function(e){
       allocFor(e).forEach(function(p){
         if(p.dept!==dept) return;
-        rows.push([p.dept, costMonthOf(e), e.id, e['品名'], e['項目'], p.amount, e['状態']]);
+        rows.push([p.dept, costMonthOf(e), e.id, e['品名'], e['項目'], e['目的'],
+          accountFor(e['項目'], e['目的'], p.dept) || e['勘定科目'] || '',
+          isSeizoDept(p.dept) ? '製造' : 'その他',
+          num(e['税込']), p.amount, e['状態']]);
       });
     });
     csv(rows, '課のコスト_'+dept+'.csv');
+  };
+  $('btn-alloc-csv').onclick = function(){
+    var rows = [['月','id','品名','項目','目的','元の部門','税込','分けた先','按分後金額','原価区分','勘定科目','分け方','状態']];
+    DB['購入'].forEach(function(e){
+      var key = allocRuleFor(e);
+      var rule = key ? DB['按分'].filter(function(a){ return allocLive(a) && allocKey(a)===key; })[0] : null;
+      allocFor(e).forEach(function(p){
+        rows.push([costMonthOf(e), e.id, e['品名'], e['項目'], e['目的'], e['部門'], num(e['税込']),
+          p.dept, p.amount, isSeizoDept(p.dept) ? '製造' : 'その他',
+          accountFor(e['項目'], e['目的'], p.dept) || e['勘定科目'] || '',
+          rule ? (allocTarget(rule)+'：'+rule['キーワード']) : '分けていない', e['状態']]);
+      });
+    });
+    csv(rows, '按分の内訳.csv');
   };
 
   document.addEventListener('click', function(e){
@@ -3005,7 +3065,7 @@ function wire(){
     else if(d.paid) confirmPaid(Number(d.paid));
     else if(d.pay) markPaid(Number(d.pay));
     else if(d.ms) toggleMaster(Number(d.ms));
-    else if(d.delalloc) delAlloc(d.delalloc);
+    else if(d.delalloc) delAlloc(d.delalloc, d.alloctgt);
     else if(d.deladmin) removeAdmin(d.deladmin);
     else if(d.payreq) copyPayRequest(Number(d.payreq));
     else if(d.delperson) removePerson(Number(d.delperson));
