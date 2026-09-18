@@ -906,7 +906,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-18 v32';
+var BUILD = '2026-09-18 v33';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -3104,7 +3104,16 @@ function reopen(row){
 }
 
 /* ==================== 起動 ==================== */
-window.addEventListener('DOMContentLoaded', wire);
+window.addEventListener('DOMContentLoaded', function(){
+  wire();
+  /* ?v=17 のような版を固定するURLはアドレス欄から消す。ブックマークに残さない。 */
+  try{
+    if(location.search){ history.replaceState(null, '', location.pathname + location.hash); }
+  }catch(e){}
+  checkBuild();
+  /* 開きっぱなしのタブにも届くよう、30分ごとに見に行く。 */
+  setInterval(checkBuild, 30*60*1000);
+});
 
 /* 版が古いまま使われるのを防ぐ。
    ?v=17 のようなURLを開きっぱなしにすると、その版がキャッシュされて修正が届かない。
@@ -3116,6 +3125,7 @@ async function checkBuild(){
     var txt = await res.text();
     var m = txt.match(/var BUILD = '([^']+)'/);
     if(!m || m[1] === BUILD) return;
+    if(document.querySelector('.updatebar')) return;
     var bar = document.createElement('div');
     bar.className = 'updatebar';
     bar.innerHTML = '<span>' +
