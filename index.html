@@ -1044,15 +1044,23 @@ function initGIS(){
 /* Google の引換券は1時間で切れる。開きっぱなしで保存すると 401 になるので、
    切れたら黙って取り直し、同じ呼び出しを1回だけやり直す。 */
 var renewing = null;
-function renewToken(){
+function renewToken(visible){
   if(renewing) return renewing;
   var ok, ng;
   var p = new Promise(function(a, b){ ok = a; ng = b; });
   p._ok = ok; p._ng = ng; renewing = p;
-  try{ tokenClient.requestAccessToken({prompt: '', login_hint: me.email || undefined}); }
-  catch(e){ ng(e); }
+  try{
+    tokenClient.requestAccessToken(visible
+      ? {prompt: 'select_account'}
+      : {prompt: '', login_hint: me.email || undefined});
+  }catch(e){ ng(e); }
   p.then(function(){ renewing = null; }, function(){ renewing = null; });
   return p;
+}
+/* 「もう一度ログイン」を押したとき。まず黙って取り直し、だめなら画面を出す。
+   押した直後なのでポップアップは塞がれない。記入した内容はそのまま残る。 */
+function reauth(){
+  return renewToken(false).catch(function(){ return renewToken(true); });
 }
 async function onToken(resp){
   var r = renewing;
@@ -1874,7 +1882,7 @@ async function submitEntry(asDraft){
       (expired ? esc(tx('ログインの有効期限が切れています'))+' <button type="button" class="btn" id="btn-relogin">'+esc(tx('もう一度ログイン'))+'</button>'
                : '<span class="mono">'+esc(ex.message)+'</span>')+'</div>';
     if(expired) $('btn-relogin').onclick = function(){
-      renewToken().then(function(){
+      reauth().then(function(){
         $('form-err').innerHTML = '';
         toast(tx('ログインし直しました。もう一度「保存」を押してください。'));
       }, function(e){ toast(e.message, true); });
