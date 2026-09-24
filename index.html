@@ -684,6 +684,7 @@ function lang(){ var v=null; try{ v=localStorage.getItem(LANG_KEY); }catch(e){} 
 function isEn(){ return lang()==='en'; }
 /* 英語UI。購入フォームの13項目は Ishita さんの訳（purchase_form_translation.xlsx 2026-09-15）をそのまま使う。それ以外は暫定訳。 */
 var EN = {
+  'ログインの有効期限が切れています':'Your sign-in has expired','もう一度ログイン':'Sign in again','ログインし直しました。もう一度「保存」を押してください。':'Signed in again. Please press Save once more.',
   // ヘッダー／ログイン／セットアップ
   '予算':'Budget','ログアウト':'Sign out','Choreia 予算':'Choreia Budget','Googleでログイン':'Sign in with Google',
   '購入の申請から支払いまでを1画面で。入力したものは会社のスプレッドシートにそのまま入ります。':'Purchase requests through payment on one screen. Everything you enter goes straight into the company spreadsheet.',
@@ -906,7 +907,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-18 v33';
+var BUILD = '2026-09-24 v34';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -1025,16 +1026,44 @@ function toast(msg, bad){
 /* ==================== 認証 ==================== */
 function initGIS(){
   tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID, scope: SCOPES, callback: onToken
+    client_id: CLIENT_ID, scope: SCOPES, callback: onToken,
+    error_callback: function(err){   // ポップアップが塞がれた・閉じられた
+      if(renewing) renewing._ng(new Error(tx('ログインの有効期限が切れています')));
+    }
   });
+  // 切れる5分前を過ぎていたら、次にどこかを押した瞬間に取り直す（押した瞬間ならポップアップが塞がれない）
+  document.addEventListener('click', function(){
+    if(!accessToken || !me.email || renewing) return;
+    var exp = +sessionStorage.getItem('cb_token_exp') || 0;
+    if(exp && Date.now() > exp - 5*60*1000) renewToken().catch(function(){});
+  }, true);
   var saved = sessionStorage.getItem('cb_token');
   if(saved){ accessToken=saved; start(true); }
 }
 
+/* Google の引換券は1時間で切れる。開きっぱなしで保存すると 401 になるので、
+   切れたら黙って取り直し、同じ呼び出しを1回だけやり直す。 */
+var renewing = null;
+function renewToken(){
+  if(renewing) return renewing;
+  var ok, ng;
+  var p = new Promise(function(a, b){ ok = a; ng = b; });
+  p._ok = ok; p._ng = ng; renewing = p;
+  try{ tokenClient.requestAccessToken({prompt: '', login_hint: me.email || undefined}); }
+  catch(e){ ng(e); }
+  p.then(function(){ renewing = null; }, function(){ renewing = null; });
+  return p;
+}
 async function onToken(resp){
-  if(resp.error){ toast('ログインできませんでした', true); return; }
+  var r = renewing;
+  if(resp.error){
+    if(r){ r._ng(new Error(tx('ログインの有効期限が切れています'))); return; }
+    toast('ログインできませんでした', true); return;
+  }
   accessToken = resp.access_token;
   sessionStorage.setItem('cb_token', accessToken);
+  sessionStorage.setItem('cb_token_exp', String(Date.now() + (+resp.expires_in || 3600)*1000));
+  if(r){ r._ok(); return; }
   start(false);
 }
 async function start(silent){
@@ -1172,11 +1201,15 @@ function signOut(){
 }
 
 /* ==================== API ==================== */
-async function api(url, opts){
+async function api(url, opts, retried){
   opts = opts || {};
-  opts.headers = Object.assign({'Authorization':'Bearer '+accessToken}, opts.headers||{});
+  opts.headers = Object.assign({}, opts.headers||{}, {'Authorization':'Bearer '+accessToken});
   if(opts.body && !opts.headers['Content-Type']) opts.headers['Content-Type']='application/json';
   var res = await fetch(url, opts);
+  if(res.status===401 && !retried && tokenClient && me.email){
+    await renewToken();
+    return api(url, opts, true);
+  }
   if(!res.ok){
     var t=''; try{ t = await res.text(); }catch(e){}
     throw new Error(res.status + ' ' + t.slice(0,300));
@@ -1189,7 +1222,7 @@ function A1(sheet, range){ return encodeURIComponent(sheet+'!'+range); }
 /* 書き込み役（Apps Script）を経由するかどうか。
    経由する設定なら、記入する人はスプレッドシートの権限を持たなくていい。 */
 function viaGas(){ return !!(orgConfig && orgConfig.apiUrl); }
-async function gas(payload){
+async function gas(payload, retried){
   var res = await fetch(orgConfig.apiUrl, {
     method: 'POST',
     headers: {'Content-Type':'text/plain;charset=utf-8'},   // 余計な事前確認を起こさないため
@@ -1197,6 +1230,10 @@ async function gas(payload){
   });
   if(!res.ok) throw new Error('書き込み役に届きませんでした（'+res.status+'）');
   var j = await res.json();
+  if(j.error && !retried && tokenClient && me.email && /ログインを確認できません/.test(j.error)){
+    await renewToken();
+    return gas(payload, true);
+  }
   if(j.error) throw new Error(j.error);
   return j;
 }
@@ -1832,7 +1869,16 @@ async function submitEntry(asDraft){
     clearForm();
     await loadAll(); renderAll();
   }catch(ex){
-    $('form-err').innerHTML = '<div class="err">'+tx('保存できませんでした。')+'<br><span class="mono">'+esc(ex.message)+'</span></div>';
+    var expired = /^401 |ログインの有効期限|ログインを確認できません/.test(ex.message);
+    $('form-err').innerHTML = '<div class="err">'+tx('保存できませんでした。')+'<br>'+
+      (expired ? esc(tx('ログインの有効期限が切れています'))+' <button type="button" class="btn" id="btn-relogin">'+esc(tx('もう一度ログイン'))+'</button>'
+               : '<span class="mono">'+esc(ex.message)+'</span>')+'</div>';
+    if(expired) $('btn-relogin').onclick = function(){
+      renewToken().then(function(){
+        $('form-err').innerHTML = '';
+        toast(tx('ログインし直しました。もう一度「保存」を押してください。'));
+      }, function(e){ toast(e.message, true); });
+    };
   }finally{
     btn.disabled=false; btn.textContent = asDraft ? tx('下書きで保存') : tx('チェックに出す');
   }
