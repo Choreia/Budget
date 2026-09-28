@@ -592,6 +592,10 @@
         <p class="lede">足りないものを自動で拾います。人が気づく必要はありません。</p>
         <div id="gaps-tiles" class="tiles"></div>
         <div id="gaps-list"><div class="loading">読み込み中…</div></div>
+        <div class="card" id="dups-card" style="margin-top:22px" hidden>
+          <h3>番号が重なっています</h3>
+          <div class="body" id="dups-box"></div>
+        </div>
         <div class="card" style="margin-top:22px">
           <h3>どの証憑が要るか</h3>
           <div class="body" id="rules-box"></div>
@@ -907,7 +911,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-24 v34';
+var BUILD = '2026-09-28 v35';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -1287,9 +1291,15 @@ function toArr(name, obj){
   return head.map(function(h){ return obj[h]!==undefined && obj[h]!==null ? String(obj[h]) : ''; });
 }
 async function appendRow(name, obj){
-  if(viaGas()){ await gas({action:'append', sheet:name, row:obj}); return; }
+  if(viaGas()) return await gas({action:'append', sheet:name, row:obj});
   await api(SS+ssId+'/values/'+A1(name,'A1')+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',
     {method:'POST', body: JSON.stringify({values:[toArr(name,obj)]})});
+  return {};
+}
+/* 証憑フォルダの名前を付け替える。中身とリンクはそのまま。 */
+async function renameFolder(folderId, name){
+  try{ await api('https://www.googleapis.com/drive/v3/files/'+folderId+'?supportsAllDrives=true',
+    {method:'PATCH', body: JSON.stringify({name:name})}); }catch(e){}
 }
 async function saveRow(name, obj){
   if(!obj._row) return appendRow(name, obj);
@@ -1722,10 +1732,23 @@ async function uploadTo(folderId, file){
 }
 
 /* ==================== 記入 ==================== */
-function nextId(){
+/* 番号は書き込み役（サーバ側）に取り置いてもらう。
+   手元のデータから数えると、画面が古いときや2人が同時に出したときに同じ番号になる。
+   書き込み役を使わない設定のときだけ、シートを読み直してから数える。 */
+function localNextId(rows){
   var mx = 0;
-  DB['購入'].forEach(function(e){ var m = String(e.id||'').match(/^G(\d+)$/); if(m) mx = Math.max(mx, Number(m[1])); });
+  (rows || DB['購入']).forEach(function(e){
+    var m = String(e.id||'').match(/^G(\d+)$/); if(m) mx = Math.max(mx, Number(m[1]));
+  });
   return 'G' + String(mx+1).padStart(4,'0');
+}
+async function reserveId(){
+  if(viaGas()){
+    var r = await gas({action:'newid'});
+    if(r && r.id) return r.id;
+  }
+  try{ return localNextId(await readSheet('購入')); }catch(e){}
+  return localNextId();
 }
 /* 事業ごとの必要証憑。設定ファイルで足せる。 */
 function projectEvidence(p){
@@ -1831,7 +1854,7 @@ async function submitEntry(asDraft){
   try{
     if(!gross) gross = Math.floor(net*(1+TAX));
     if(!net) net = Math.round(gross/(1+TAX));
-    var id = nextId();
+    var id = await reserveId();
     var folder = null;
     if(pendingFiles.length || !asDraft){
       folder = await createFolder(id + '_' + name);
@@ -1866,7 +1889,12 @@ async function submitEntry(asDraft){
       '更新日時':nowStr(), '更新者':me.name
     };
     e['支払期限'] = dueOf(e);
-    await appendRow('購入', e);
+    var saved = await appendRow('購入', e);
+    // 万一ぶつかって書き込み役が番号を取り直したら、こちらもその番号に合わせる
+    if(saved && saved.id && saved.id !== id){
+      id = saved.id; e.id = id;
+      if(folder) await renameFolder(folder.id, id + '_' + name);
+    }
     // 使用回数の更新はおまけ。ここで失敗しても記入は成功している。
     try{
       await bumpMaster('部門', form.dept);
@@ -2441,7 +2469,65 @@ function findGaps(){
   }
   return out.sort(function(a,b){ return b.days-a.days; });
 }
+/* 同じ番号が2つ以上ついている記入を拾う。
+   以前はブラウザ側で番号を数えていたので、同時に出すと重なることがあった。 */
+function dupIds(){
+  var by = {};
+  DB['購入'].forEach(function(e){ if(e.id) (by[e.id] = by[e.id] || []).push(e); });
+  return Object.keys(by).filter(function(k){ return by[k].length > 1; })
+    .sort().map(function(k){ return {id:k, rows:by[k]}; });
+}
+function renderDups(){
+  var box = $('dups-box'); if(!box) return;
+  var d = dupIds();
+  $('dups-card').hidden = !d.length;
+  if(!d.length) return;
+  box.innerHTML = '<p style="margin:0 0 12px;color:var(--sub);font-size:.85rem">'+
+    '同じ番号が2つ以上ついています。あとから出したほうに新しい番号を付け直します。'+
+    '証憑フォルダの名前も付け直しますが、中身とリンクはそのままです。金額や内容は何も変わりません。</p>'+
+    d.map(function(x){
+      return '<div class="card" style="margin-bottom:10px"><div class="body">'+
+        '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'+
+        '<span class="pill p-bad">'+esc(x.id)+'</span><b>'+cnt(x.rows.length)+'</b>'+
+        (me.role==='acc' ? '<button class="btn sm" style="margin-left:auto" data-fixdup="'+esc(x.id)+'">番号を付け直す</button>' : '')+
+        '</div><div class="tablewrap" style="box-shadow:none;margin-top:10px"><table style="min-width:0"><thead><tr>'+
+        '<th>記入日時</th><th>記入者</th><th>品名</th><th>税込</th></tr></thead><tbody>'+
+        x.rows.map(function(e){
+          return '<tr><td class="mono">'+esc(e['記入日時']||'')+'</td><td>'+esc(e['記入者']||'')+'</td>'+
+            '<td>'+esc(e['品名']||'')+'</td><td class="num">'+yen(num(e['税込']))+'</td></tr>';
+        }).join('')+'</tbody></table></div></div></div>';
+    }).join('');
+}
+async function fixDup(id){
+  var rows = DB['購入'].filter(function(e){ return e.id===id; })
+    .sort(function(a,b){ return String(a['記入日時']||'').localeCompare(String(b['記入日時']||'')); });
+  if(rows.length < 2) return;
+  var keep = rows[0], rest = rows.slice(1);
+  if(!confirm('番号 '+id+' は '+rows.length+' 件あります。'+
+              '\nいちばん先に出した1件（'+(keep['品名']||'')+'）はそのままにして、'+
+              'あとの '+rest.length+' 件に新しい番号を付け直します。よろしいですか。')) return;
+  busy('番号を付け直しています…');
+  try{
+    for(var i=0;i<rest.length;i++){
+      var e = rest[i];
+      var newId = await reserveId();
+      var before = e.id;
+      e.id = newId;
+      await saveRow('購入', e);
+      if(e['証憑フォルダ']){
+        var fid = idFromUrl(e['証憑フォルダ']);
+        if(fid) await renameFolder(fid, newId + '_' + (e['品名']||''));
+      }
+      await logAudit('番号の付け直し', newId, before, newId+' '+(e['品名']||''));
+    }
+    toast('番号を付け直しました。');
+    await loadAll(); renderAll();
+  }catch(ex){ toast('付け直せませんでした：'+ex.message, true); }
+  finally{ busy(false); }
+}
+
 function renderGaps(){
+  renderDups();
   var g = findGaps();
   $('cnt-gaps').textContent = g.length;
   $('cnt-gaps').hidden = !g.length;
@@ -3106,7 +3192,7 @@ function wire(){
   };
 
   document.addEventListener('click', function(e){
-    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc],[data-deladmin],[data-payreq],[data-delperson]');
+    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc],[data-deladmin],[data-payreq],[data-delperson],[data-fixdup]');
     if(!t) return;
     var d = t.dataset;
     if(d.go){ setTab(d.go); window.scrollTo({top:0,behavior:'smooth'}); }
@@ -3120,6 +3206,7 @@ function wire(){
     else if(d.pay) markPaid(Number(d.pay));
     else if(d.ms) toggleMaster(Number(d.ms));
     else if(d.delalloc) delAlloc(d.delalloc, d.alloctgt);
+    else if(d.fixdup) fixDup(d.fixdup);
     else if(d.deladmin) removeAdmin(d.deladmin);
     else if(d.payreq) copyPayRequest(Number(d.payreq));
     else if(d.delperson) removePerson(Number(d.delperson));

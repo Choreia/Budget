@@ -66,6 +66,7 @@ function doPost(e) {
                                   spreadsheetId: book().getId(), spreadsheetName: book().getName() });
       case 'ensure': return json(doEnsure(me));
       case 'read':   return json(doRead(me, req.sheets));
+      case 'newid':  return json({ ok: true, id: reserveId() });
       case 'append': return json(doAppend(me, req.sheet, req.row));
       case 'update': return json(doUpdate(me, req.sheet, req.row, req.rowIndex));
       default:       return json({ error: '知らない操作です: ' + req.action });
@@ -291,7 +292,8 @@ function doAppend(me, name, row) {
     if (name === '購入') {
       row['記入者メール'] = me.email;
       row['記入者'] = row['記入者'] || me.name;
-      if (!row['id']) row['id'] = nextId();
+      // 番号はここで最終確認する。空のとき、もう使われているときは取り直す。
+      if (!row['id'] || idExists(row['id'])) row['id'] = reserveId();
     }
     var r = appendRaw(name, row);
     logIt(me, '追加', name + ' ' + (row['id'] || row['値'] || ''), '', String(row['品名'] || row['項目'] || ''));
@@ -351,15 +353,42 @@ function canWrite(me, name, row, old) {
   return null;
 }
 
-function nextId() {
+/* シートにある一番大きい番号 */
+function maxIdInSheet() {
   var rows = readValues('購入');
-  if (!rows.length) return 'G0001';
+  if (!rows.length) return 0;
   var head = rows[0], c = head.indexOf('id'), mx = 0;
   for (var i = 1; i < rows.length; i++) {
     var m = String(rows[i][c] || '').match(/^G(\d+)$/);
     if (m) mx = Math.max(mx, Number(m[1]));
   }
-  return 'G' + ('0000' + (mx + 1)).slice(-4);
+  return mx;
+}
+function idExists(id) {
+  var rows = readValues('購入');
+  if (!rows.length) return false;
+  var head = rows[0], c = head.indexOf('id');
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][c] || '') === String(id)) return true;
+  }
+  return false;
+}
+/* 番号を1つ取り置く。
+   ブラウザ側で数えると、画面が古いときや2人が同時に出したときに同じ番号になる。
+   ここで鍵をかけて、シートの最大値と取り置き済みの大きいほうに1を足して返す。
+   出すのをやめたときは番号が飛ぶが、同じ番号が2つできるより飛ぶほうがよい。 */
+function reserveId() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var kept = Number(props.getProperty('last_id') || 0);
+    var n = Math.max(kept, maxIdInSheet()) + 1;
+    props.setProperty('last_id', String(n));
+    return 'G' + ('0000' + n).slice(-4);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function logIt(me, action, target, before, after) {
