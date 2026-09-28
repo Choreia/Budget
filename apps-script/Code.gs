@@ -66,8 +66,8 @@ function doPost(e) {
                                   spreadsheetId: book().getId(), spreadsheetName: book().getName() });
       case 'ensure': return json(doEnsure(me));
       case 'read':   return json(doRead(me, req.sheets));
-      case 'newid':  return json({ ok: true, id: reserveId() });
-      case 'append': return json(doAppend(me, req.sheet, req.row));
+      case 'newid':  return json({ ok: true, id: reserveId(cleanPrefix(req.prefix)) });
+      case 'append': return json(doAppend(me, req.sheet, req.row, req.prefix));
       case 'update': return json(doUpdate(me, req.sheet, req.row, req.rowIndex));
       default:       return json({ error: '知らない操作です: ' + req.action });
     }
@@ -282,7 +282,7 @@ function blankRow(n) {
   return a;
 }
 
-function doAppend(me, name, row) {
+function doAppend(me, name, row, prefix) {
   if (!SHEETS[name]) return { error: '知らないシートです' };
   var guard = canWrite(me, name, row, null);
   if (guard) return { error: guard };
@@ -293,7 +293,9 @@ function doAppend(me, name, row) {
       row['記入者メール'] = me.email;
       row['記入者'] = row['記入者'] || me.name;
       // 番号はここで最終確認する。空のとき、もう使われているときは取り直す。
-      if (!row['id'] || idExists(row['id'])) row['id'] = reserveId();
+      if (!row['id'] || idExists(row['id'])) {
+        row['id'] = reserveId(cleanPrefix(prefix || String(row['id'] || '').replace(/\d+$/, '')));
+      }
     }
     var r = appendRaw(name, row);
     logIt(me, '追加', name + ' ' + (row['id'] || row['値'] || ''), '', String(row['品名'] || row['項目'] || ''));
@@ -353,13 +355,19 @@ function canWrite(me, name, row, old) {
   return null;
 }
 
-/* シートにある一番大きい番号 */
-function maxIdInSheet() {
+/* 管理番号の頭文字。アプリの設定で決め、呼び出しのたびに渡してもらう。
+   過去の手作業の番号（No / t / g / G / MM）と重ならないよう、既定は B。 */
+function cleanPrefix(p) {
+  p = String(p || '').toUpperCase();
+  return /^[A-Z]{1,4}$/.test(p) ? p : 'B';
+}
+/* シートにある、その頭文字の一番大きい番号 */
+function maxIdInSheet(prefix) {
   var rows = readValues('購入');
   if (!rows.length) return 0;
   var head = rows[0], c = head.indexOf('id'), mx = 0;
   for (var i = 1; i < rows.length; i++) {
-    var m = String(rows[i][c] || '').match(/^G(\d+)$/);
+    var m = String(rows[i][c] || '').match(new RegExp('^' + prefix + '(\\d+)$'));
     if (m) mx = Math.max(mx, Number(m[1]));
   }
   return mx;
@@ -379,15 +387,17 @@ function idExists(id) {
    ここはシート全部を見られるので、正しい番号を出せる。
    ここで鍵をかけて、シートの最大値と取り置き済みの大きいほうに1を足して返す。
    出すのをやめたときは番号が飛ぶが、同じ番号が2つできるより飛ぶほうがよい。 */
-function reserveId() {
+function reserveId(prefix) {
+  prefix = cleanPrefix(prefix);
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
     var props = PropertiesService.getScriptProperties();
-    var kept = Number(props.getProperty('last_id') || 0);
-    var n = Math.max(kept, maxIdInSheet()) + 1;
-    props.setProperty('last_id', String(n));
-    return 'G' + ('0000' + n).slice(-4);
+    var key = 'last_id_' + prefix;          // 頭文字ごとに数える
+    var kept = Number(props.getProperty(key) || 0);
+    var n = Math.max(kept, maxIdInSheet(prefix)) + 1;
+    props.setProperty(key, String(n));
+    return prefix + ('0000' + n).slice(-4);
   } finally {
     lock.releaseLock();
   }
