@@ -10,3 +10,6 @@ apps-script/貼り付け用.gs
 apps-script/paste-ready.gs
 apps-script/paste-ready-in.gs
 tools/.cache/
+manual.html
+manual/
+manual_dist/

@@ -300,6 +300,7 @@
   <header class="app">
     <div class="brand">Choreia <span>予算</span></div>
     <div class="who" id="whoami" hidden></div>
+    <a class="btn ghost sm" id="btn-help" href="https://drive.google.com/drive/folders/1LvGvPZZfiV0Nzvj9VTNkhiTovSjbky89" target="_blank" rel="noopener" style="text-decoration:none">使い方</a>
     <button class="btn ghost sm" id="btn-lang" title="Language / 言語">English</button>
     <button class="btn ghost sm" id="btn-signout" hidden>ログアウト</button>
   </header>
@@ -530,7 +531,7 @@
       <!-- チェックする -->
       <section id="approve" hidden>
         <h2 class="scr">チェックする</h2>
-        <p class="lede">自分の課に出されたものが溜まります。通してよければ1回押すだけで経理へ回ります。</p>
+        <p class="lede">担当の部署の人が出したものが溜まります。通してよければ1回押すだけで経理へ回ります。</p>
         <div id="approve-list"><div class="loading">読み込み中…</div></div>
       </section>
 
@@ -782,7 +783,7 @@ function tx(s){ if(!isEn()) return s; var k=String(s); return Object.prototype.h
 Object.assign(EN, {
   // チェックする
   'チェックする':'Review','チェック':'Review',
-  '自分の課に出されたものが溜まります。通してよければ1回押すだけで経理へ回ります。':
+  '担当の部署の人が出したものが溜まります。通してよければ1回押すだけで経理へ回ります。':
     'Entries from your department collect here. One click passes them to accounting.',
   '承認者と経理だけが見る画面です。担当の部署の人が出したものが、ここに溜まります。通してよければ1回押すだけで経理へ回ります。':
     'Only managers and accounting see this. Entries from your department collect here, and one click passes them to accounting.',
@@ -838,7 +839,8 @@ Object.assign(EN, {
     'Split one cost across departments. There are two ways to match. "Department" splits everything charged to that department (e.g. split D-base costs between manufacturing and the rest). "Item name" splits entries whose name contains a word (e.g. split ChatGPT by headcount). If both match, the item-name rule wins. Rounding is settled to the last unit and given to the largest share. The ledger keeps one entry and one set of evidence. Where a share lands on a manufacturing department, that share takes the manufacturing account.',
   '課':'Department','重み':'Weight','比率':'Share',
   'やめました':'Stopped','原価区分':'Cost type','製造（製）':'Manufacturing',
-  '管理番号の頭文字':'Reference number prefix','変える':'Change','入金予定の番号の頭文字':'Income reference prefix',
+  '管理番号の頭文字':'Reference number prefix','変える':'Change',
+  '使い方':'Guide','入金予定の番号の頭文字':'Income reference prefix',
   '請求書のファイル名の先頭にも付きます。購入の頭文字とは別の文字にしてください。':'Also used at the start of invoice file names. Must differ from the purchase prefix.',
   '入金の項目':'Item','税抜金額':'Amount (excl. tax)','登録する':'Register','入金の請求書フォルダ':'Invoice folder for incoming payments','決める':'Set',
   '入金予定を足すときの請求書がここに入ります。入金予定を足す人（承認者・経理）に、このフォルダを「編集者」で共有しておいてください。':
@@ -958,7 +960,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-29 v41';
+var BUILD = '2026-09-29 v43';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -1951,12 +1953,16 @@ async function submitEntry(asDraft){
   try{
     if(!gross) gross = Math.floor(net*(1+TAX));
     if(!net) net = Math.round(gross/(1+TAX));
-    var id = await reserveId();
+    var ed = editing;
+    var id = ed ? ed.id : await reserveId();
     var folder = null;
-    if(pendingFiles.length || !asDraft){
+    if(ed && ed['証憑フォルダ'] && idFromUrl(ed['証憑フォルダ'])){
+      folder = {id: idFromUrl(ed['証憑フォルダ']), webViewLink: ed['証憑フォルダ']};
+    } else if(pendingFiles.length || !asDraft){
       folder = await createFolder(id + '_' + name);
     }
     var flags = {};
+    if(ed) ['見積書','発注書','納品書','請求書','領収書','振込証憑','その他'].forEach(function(k){ if(ed[k]) flags[k] = ed[k]; });
     for(var i=0;i<pendingFiles.length;i++){
       await uploadTo(folder.id, pendingFiles[i].file);
       flags[pendingFiles[i].type] = 'TRUE';
@@ -1986,6 +1992,17 @@ async function submitEntry(asDraft){
       '更新日時':nowStr(), '更新者':me.name
     };
     e['支払期限'] = dueOf(e);
+    if(ed){
+      // 元の行を直す。フォームに無い列（チェック者など）も引き継ぎ、差し戻しの理由だけ消す（経緯は履歴に残る）
+      var before = ed['状態'];
+      e = Object.assign({}, ed, e, {'記入日時': ed['記入日時'], '差戻理由':'', 'チェック者':'', 'チェック日時':''});
+      await saveRow('購入', e);
+      await logAudit('直して出し直し', id, before, e['状態']);
+      toast(id + ' ' + tx('をチェックに出しました'));
+      clearForm();
+      await loadAll(); renderAll();
+      return;
+    }
     var saved = await appendRow('購入', e);
     // 万一ぶつかって書き込み役が番号を取り直したら、こちらもその番号に合わせる
     if(saved && saved.id && saved.id !== id){
@@ -2021,6 +2038,7 @@ function clearForm(){
     .forEach(function(i){ if($(i)) $(i).value=''; });
   pendingFiles=[]; $('f-files').value=''; renderFiles(); form.item=''; form.purpose='';
   chips($('ch-item'),'項目','item'); updateRoute();
+  editing = null; showEditBanner();
 }
 
 /* ==================== わたしの記入 ==================== */
@@ -3528,19 +3546,37 @@ async function sendDraft(row){
   await saveRow('購入', e); await logAudit('提出', e.id, ST.DRAFT, ST.WAIT);
   toast(e.id+' をチェックに出しました'); await loadAll(); renderAll();
 }
+/* 差し戻されたものを直すとき、元の記入をそのまま直す（番号・証憑フォルダ・記入日時はそのまま）。
+   以前は別の番号で新しく作っていたので、差し戻しの元が残り続け、証憑フォルダも分かれていた。 */
+var editing = null;
+function showEditBanner(){
+  var b = $('edit-banner');
+  if(!editing){ if(b) b.remove(); return; }
+  if(!b){ $('form-err').insertAdjacentHTML('beforebegin', '<div id="edit-banner" class="alertbar" style="margin-bottom:14px"></div>'); b = $('edit-banner'); }
+  b.innerHTML = '<span class="pill p-warn">'+esc(editing.id)+'</span><span>'+
+    esc(T('を直しています。出すと同じ番号のまま、もう一度チェックに回ります。','is being fixed. Submitting sends it for review again under the same number.'))+
+    '</span><button type="button" class="btn ghost sm" id="btn-edit-cancel">'+esc(T('直すのをやめる','Stop editing'))+'</button>';
+  $('btn-edit-cancel').onclick = function(){ clearForm(); };
+}
 function reopen(row){
   var e = DB['購入'].filter(function(x){ return x._row===row; })[0]; if(!e) return;
+  editing = e;
   $('f-name').value = e['品名']; $('f-why').value = e['購入理由'];
   $('f-net').value = num(e['税抜']).toLocaleString('ja-JP');
   $('f-gross').value = num(e['税込']).toLocaleString('ja-JP');
   $('f-vendor').value = e['購入先']; $('f-pay').value = e['支払方法']||'';
   $('f-project').value = e['事業'] || 'なし'; $('f-accepted').value = ymd(e['検収日']);
-  form.dept = e['部門']; form.item = e['項目'];
+  $('f-order').value = ymd(e['発注日']); $('f-plan').value = ymd(e['納品予定日']);
+  $('f-deliver').value = e['納品先'] || ''; $('f-invoice').value = e['インボイスNo'] || '';
+  form.dept = e['部門']; form.item = e['項目']; form.purpose = e['目的'] || '';
+  if(e['立替区分']) form.tate = e['立替区分'];
+  form.genpon = e['原本郵送'] || '無';
   chips($('ch-dept'),'部門','dept'); chips($('ch-item'),'項目','item');
   $('tatebox').hidden = !isReimb($('f-pay').value);
   updateRoute();
+  showEditBanner();
   $('f-name').scrollIntoView({behavior:'smooth', block:'center'});
-  toast('内容を下の欄に写しました。直して出し直してください。');
+  toast(T('内容を下の欄に写しました。直して出し直してください。','Copied into the form below. Fix it and submit again.'));
 }
 
 /* ==================== 起動 ==================== */
