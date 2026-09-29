@@ -960,7 +960,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-29 v43';
+var BUILD = '2026-09-29 v44';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -1610,10 +1610,13 @@ function busy(msg){
 }
 
 /* ==================== マスタ ==================== */
-function mvals(list){
-  return DB['マスタ'].filter(function(m){ return m['リスト']===list && String(m['有効']).toUpperCase()!=='FALSE'; })
-    .sort(function(a,b){ return (num(b['使用回数'])-num(a['使用回数'])) || (num(a['並び'])-num(b['並び'])); });
+/* 選択肢の並び。経理がマスタの ↑↓ で決めた順（並び列）。止めたものは後ろ。 */
+function isOn(m){ return String(m['有効']).toUpperCase()!=='FALSE'; }
+function masterOrder(list){
+  return DB['マスタ'].filter(function(m){ return m['リスト']===list; })
+    .sort(function(a,b){ return (isOn(b)-isOn(a)) || (num(a['並び'])-num(b['並び'])) || (a._row-b._row); });
 }
+function mvals(list){ return masterOrder(list).filter(isOn); }
 function bumpMaster(list, value){
   var m = DB['マスタ'].filter(function(x){ return x['リスト']===list && x['値']===value; })[0];
   if(!m) return Promise.resolve();
@@ -1676,9 +1679,12 @@ function accountFor(item, purpose, dept){
 
 /* ==================== チップ ==================== */
 function chips(el, list, key){
-  var vals = mvals(list).map(function(m){ return m['値']; });
+  var ordered = mvals(list);
+  var vals = ordered.map(function(m){ return m['値']; });
   if(!form[key] && vals.length && key==='dept') form[key] = myDepts()[0] || '';
-  var top = vals.slice(0,5);
+  // すぐ押せる5つは、よく使う順（同じなら並び順）
+  var top = ordered.map(function(m, i){ return {v:m['値'], u:num(m['使用回数']), i:i}; })
+    .sort(function(a,b){ return (b.u-a.u) || (a.i-b.i); }).slice(0,5).map(function(x){ return x.v; });
   if(form[key] && top.indexOf(form[key])<0) top.unshift(form[key]);
   var h = top.map(function(v){
     return '<button type="button" class="chip" aria-pressed="'+(form[key]===v?'true':'false')+'" data-v="'+esc(v)+'">'+esc(v)+'</button>';
@@ -2828,8 +2834,8 @@ function renderMaster(){
     sel.innerHTML = names.map(function(n){ return '<option>'+esc(n)+'</option>'; }).join('');
   }
   var list = sel.value || names[0] || '';
-  var rows = DB['マスタ'].filter(function(m){ return m['リスト']===list; })
-    .sort(function(a,b){ return (num(b['使用回数'])-num(a['使用回数'])) || (num(a['並び'])-num(b['並び'])); });
+  var rows = masterOrder(list);
+  var active = rows.filter(isOn);
   var stale = rows.filter(function(m){
     return String(m['有効']).toUpperCase()!=='FALSE' && num(m['使用回数'])===0;
   });
@@ -2839,14 +2845,20 @@ function renderMaster(){
       '<button class="btn ghost sm" id="btn-stop-stale">まとめて止める</button></div>' : '') +
     '<div class="tablewrap"><table><thead><tr><th>'+esc(isEn()?(EN[list]||list):list)+
       (isEn()?(' ('+rows.length+')'):('（'+rows.length+'件）'))+'</th><th>'+(isEn()?'Used':'使用')+
-      '</th><th>'+(isEn()?'Last used':'最終使用')+'</th><th style="text-align:center">'+(isEn()?'Active':'有効')+'</th></tr></thead><tbody>'+
+      '</th><th>'+(isEn()?'Last used':'最終使用')+'</th><th style="text-align:center">'+(isEn()?'Order':'並び')+'</th><th style="text-align:center">'+(isEn()?'Active':'有効')+'</th></tr></thead><tbody>'+
     rows.map(function(m){
-      var on = String(m['有効']).toUpperCase()!=='FALSE';
+      var on = isOn(m), ai = active.indexOf(m);
+      var mv = on
+        ? '<button class="btn ghost sm" data-mv="'+m._row+'" data-dir="-1"'+(ai<=0?' disabled':'')+' aria-label="上へ">↑</button> '+
+          '<button class="btn ghost sm" data-mv="'+m._row+'" data-dir="1"'+(ai>=active.length-1?' disabled':'')+' aria-label="下へ">↓</button>'
+        : '';
       return '<tr class="'+(on?'':'off')+'"><td>'+esc(m['値'])+'</td><td class="num">'+num(m['使用回数'])+'</td>'+
         '<td class="mono">'+esc(m['最終使用']||'—')+'</td>'+
+        '<td style="text-align:center;white-space:nowrap">'+mv+'</td>'+
         '<td class="swcell" style="text-align:center"><button class="sw" aria-pressed="'+on+'" data-ms="'+m._row+'" aria-label="'+esc(m['値'])+'"></button></td></tr>';
     }).join('')+'</tbody></table></div>'+
-    '<p class="lockline">止めても過去のデータは残ります。新しい記入の選択肢に出なくなるだけです。</p>';
+    '<p class="lockline">止めても過去のデータは残ります。新しい記入の選択肢に出なくなるだけです。'+
+    '↑↓で、記入のときの一覧（「ほかを探す」）の並びを変えられます。すぐ押せる5つは、よく使われている順です。</p>';
   var b = $('btn-stop-stale');
   if(b) b.onclick = async function(){
     if(!confirm(T(stale.length+'件を止めます。よろしいですか。',
@@ -3219,6 +3231,38 @@ async function saveUser(row, field, value){
   if((u['メール']||'').toLowerCase()===me.email.toLowerCase()){ await ensureMe(); }
   await loadAll(); renderAll();
 }
+var movingMaster = false;
+async function moveMaster(row, dir){
+  if(movingMaster) return;
+  var m = DB['マスタ'].filter(function(x){ return x._row===row; })[0]; if(!m) return;
+  var act = masterOrder(m['リスト']).filter(isOn);
+  var i = act.indexOf(m), j = i + dir;
+  if(i<0 || j<0 || j>=act.length) return;
+  movingMaster = true;
+  try{
+    // 動かした先の両どなりの間に入れる
+    var rest = act.filter(function(x){ return x!==m; });
+    var a = rest[j-1], b = rest[j];
+    var lo = a ? num(a['並び']) : (b ? num(b['並び'])-2 : 0);
+    var hi = b ? num(b['並び']) : lo + 2;
+    var mid = (lo + hi) / 2;
+    if(!(mid > lo && mid < hi)){
+      // 同じ値が並んでいて間が無い。この一覧だけ 10, 20, 30… と振り直す（はじめの1回だけ）
+      rest.splice(j, 0, m);
+      busy(T('並びを整えています…','Reordering…'));
+      for(var k=0;k<rest.length;k++){
+        var v = String((k+1)*10);
+        if(rest[k]['並び'] !== v){ rest[k]['並び'] = v; await saveRow('マスタ', rest[k]); }
+      }
+    } else {
+      m['並び'] = String(Math.round(mid*1000)/1000);
+      await saveRow('マスタ', m);
+    }
+    await logAudit('マスタ並び替え', m['リスト']+'/'+m['値'], '', dir<0?'上へ':'下へ');
+    await loadAll(); renderAll();
+  }catch(e){ toast(T('動かせませんでした：','Could not move: ')+e.message, true); }
+  finally{ movingMaster = false; busy(false); }
+}
 async function toggleMaster(row){
   var m = DB['マスタ'].filter(function(x){ return x._row===row; })[0]; if(!m) return;
   var on = String(m['有効']).toUpperCase()!=='FALSE';
@@ -3506,7 +3550,7 @@ function wire(){
   };
 
   document.addEventListener('click', function(e){
-    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc],[data-deladmin],[data-payreq],[data-delperson],[data-fixdup],[data-incev]');
+    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc],[data-deladmin],[data-payreq],[data-delperson],[data-fixdup],[data-incev],[data-mv]');
     if(!t) return;
     var d = t.dataset;
     if(d.go){ setTab(d.go); window.scrollTo({top:0,behavior:'smooth'}); }
@@ -3519,6 +3563,7 @@ function wire(){
     else if(d.paid) confirmPaid(Number(d.paid));
     else if(d.pay) markPaid(Number(d.pay));
     else if(d.ms) toggleMaster(Number(d.ms));
+    else if(d.mv) moveMaster(Number(d.mv), Number(d.dir));
     else if(d.delalloc) delAlloc(d.delalloc, d.alloctgt);
     else if(d.fixdup) fixDup(d.fixdup);
     else if(d.incev) pickIncomeInvoice(Number(d.incev));
