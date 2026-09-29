@@ -958,7 +958,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-29 v38';
+var BUILD = '2026-09-29 v39';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -1350,7 +1350,7 @@ async function renameFolder(folderId, name){
 }
 async function saveRow(name, obj){
   if(!obj._row) return appendRow(name, obj);
-  if(viaGas()){ await gas({action:'update', sheet:name, row:obj, rowIndex:obj._row}); return; }
+  if(viaGas()){ await gas({action:'update', sheet:name, row:obj, rowIndex:obj._row, matchId:obj._matchId||obj.id||''}); return; }
   await api(SS+ssId+'/values/'+A1(name,'A'+obj._row)+'?valueInputOption=RAW',
     {method:'PUT', body: JSON.stringify({values:[toArr(name,obj)]})});
 }
@@ -2038,10 +2038,11 @@ function renderMy(){
     if(miss.length && e['状態']!==ST.DRAFT) sub.push(isEn() ? ('Missing: '+esc(miss.map(tx).join(', '))) : (esc(miss.join('・'))+'がまだです'));
     if(e['種別'] && e['種別']!=='購入') sub.push(esc(e['種別']));
     var act = '';
-    if(e['状態']===ST.REJ) act = '<button class="btn sm" data-edit="'+e._row+'">'+tx('直して出す')+'</button>';
-    else if(e['状態']===ST.WAIT) act = '<button class="btn ghost sm" data-wd="'+e._row+'">'+tx('取り下げる')+'</button>';
+    var wdBtn = ' <button class="btn ghost sm" data-wd="'+e._row+'">'+tx('取り下げる')+'</button>';
+    if(e['状態']===ST.REJ) act = '<button class="btn sm" data-edit="'+e._row+'">'+tx('直して出す')+'</button>'+wdBtn;
+    else if(e['状態']===ST.WAIT) act = wdBtn;
+    else if(e['状態']===ST.DRAFT) act = '<button class="btn sm" data-send="'+e._row+'">'+tx('出す')+'</button>'+wdBtn;
     else if(miss.length) act = '<button class="btn sm" data-ev="'+e._row+'">'+tx('証憑を上げる')+'</button>';
-    else if(e['状態']===ST.DRAFT) act = '<button class="btn sm" data-send="'+e._row+'">'+tx('出す')+'</button>';
     return '<tr><td class="mono">'+esc(e.id)+'</td><td class="mono">'+md(e['記入日時'])+'</td>'+
       '<td class="name">'+esc(e['品名'])+(sub.length?'<small>'+sub.join(' ／ ')+'</small>':'')+'</td>'+
       '<td class="num">'+Number(num(e['税込'])).toLocaleString('ja-JP')+'</td><td>'+statusPill(e)+'</td><td>'+act+'</td></tr>';
@@ -2316,6 +2317,7 @@ function renderLedger(){
         '<td class="mono">'+md(e['支払日'])+'</td><td>'+statusPill(e)+
         (e['状態']===ST.OK ? ' <button class="btn ghost sm" data-payreq="'+e._row+'">支払依頼の文面</button>' : '')+
         (me.role==='acc' && e['状態']===ST.OK ? ' <button class="btn sm" data-pay="'+e._row+'">支払済に</button>' : '')+
+        (me.role==='acc' && e['状態']!==ST.PAID && e['状態']!==ST.WD ? ' <button class="btn ghost sm" data-wd="'+e._row+'">取り下げる</button>' : '')+
         '</td></tr>';
     }).join('')+'</tbody></table></div>'+
     '<p class="lockline">🔒 ここでは直せません。修正は経理へ。変更はすべて「履歴」タブに残ります。</p>';
@@ -2680,8 +2682,10 @@ async function fixDup(id){
       var e = rest[i];
       var newId = await reserveId();
       var before = e.id;
+      e._matchId = before;
       e.id = newId;
       await saveRow('購入', e);
+      delete e._matchId;
       if(e['証憑フォルダ']){
         var fid = idFromUrl(e['証憑フォルダ']);
         if(fid) await renameFolder(fid, newId + '_' + (e['品名']||''));
@@ -3466,9 +3470,11 @@ function wire(){
 }
 async function withdraw(row){
   var e = DB['購入'].filter(function(x){ return x._row===row; })[0]; if(!e) return;
-  if(!confirm(T(e.id+' を取り下げますか。', 'Withdraw '+e.id+'?'))) return;
+  if(!confirm(T(e.id+' を取り下げますか。\n番号と記録は残り、集計・支払・抜けているものからは外れます。',
+                'Withdraw '+e.id+'? The record stays but is left out of totals and payments.'))) return;
+  var prev = e['状態'];
   e['状態']=ST.WD; e['更新日時']=nowStr(); e['更新者']=me.name;
-  await saveRow('購入', e); await logAudit('取り下げ', e.id, ST.WAIT, ST.WD);
+  await saveRow('購入', e); await logAudit('取り下げ', e.id, prev, ST.WD);
   toast('取り下げました'); await loadAll(); renderAll();
 }
 async function sendDraft(row){

@@ -39,7 +39,7 @@ var SHEETS = {
   '入金': ['id','記入日時','記入者','部門','種別','項目','証憑','税込','税抜','振込期日','入金確認日','確認者','売掛入力','備考'],
   'マスタ': ['リスト','値','有効','並び','使用回数','最終使用'],
   '人': ['メール','名前','ロール','部門','上長メール'],
-  '按分': ['id','キーワード','分け方','部門','重み','有効','更新者','更新日時'],
+  '按分': ['id','キーワード','分け方','部門','重み','有効','更新者','更新日時','対象'],
   '履歴': ['日時','操作者','操作','対象','変更前','変更後'],
   '仕訳ルール': ['科目','目的','部門区分','勘定科目','有効','備考']
 };
@@ -68,7 +68,7 @@ function doPost(e) {
       case 'read':   return json(doRead(me, req.sheets));
       case 'newid':  return json({ ok: true, id: reserveId(req.prefix, numberedSheet(req.sheet)) });
       case 'append': return json(doAppend(me, req.sheet, req.row, req.prefix));
-      case 'update': return json(doUpdate(me, req.sheet, req.row, req.rowIndex));
+      case 'update': return json(doUpdate(me, req.sheet, req.row, req.rowIndex, req.matchId));
       default:       return json({ error: '知らない操作です: ' + req.action });
     }
   } catch (err) {
@@ -308,11 +308,30 @@ function doAppend(me, name, row, prefix) {
   }
 }
 
-function doUpdate(me, name, row, rowIndex) {
+/* 番号でその行を探す。見つからなければ 0。 */
+function findRowById(name, id) {
+  var rows = readValues(name);
+  if (!rows.length) return 0;
+  var c = rows[0].indexOf('id');
+  if (c < 0) return 0;
+  for (var i = 1; i < rows.length; i++) if (String(rows[i][c] || '') === String(id)) return i + 1;
+  return 0;
+}
+function doUpdate(me, name, row, rowIndex, matchId) {
   if (!SHEETS[name]) return { error: '知らないシートです' };
   rowIndex = Number(rowIndex || row._row);
   if (!rowIndex || rowIndex < 2) return { error: '行が分かりません' };
   var sh = sheetOf(name), head = headOf(name);
+  // 行番号だけを信じない。シートで行を消されると、画面が覚えている行番号がずれて
+  // 別の記入を上書きしてしまう。番号（id）が合っているか確かめ、ずれていたら番号で探し直す。
+  var want = String(matchId || row['id'] || '');
+  if (want && (name === '購入' || name === '入金')) {
+    var atRow = String(sh.getRange(rowIndex, head.indexOf('id') + 1).getDisplayValue() || '');
+    if (atRow !== want) {
+      rowIndex = findRowById(name, want);
+      if (!rowIndex) return { error: want + ' がシートに見つかりません。画面を読み直してください。' };
+    }
+  }
   var before = sh.getRange(rowIndex, 1, 1, head.length).getDisplayValues()[0];
   var old = {};
   head.forEach(function (h, i) { old[h] = before[i]; });
