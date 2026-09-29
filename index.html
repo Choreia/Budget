@@ -838,7 +838,8 @@ Object.assign(EN, {
     'Split one cost across departments. There are two ways to match. "Department" splits everything charged to that department (e.g. split D-base costs between manufacturing and the rest). "Item name" splits entries whose name contains a word (e.g. split ChatGPT by headcount). If both match, the item-name rule wins. Rounding is settled to the last unit and given to the largest share. The ledger keeps one entry and one set of evidence. Where a share lands on a manufacturing department, that share takes the manufacturing account.',
   '課':'Department','重み':'Weight','比率':'Share',
   'やめました':'Stopped','原価区分':'Cost type','製造（製）':'Manufacturing',
-  '管理番号の頭文字':'Reference number prefix','変える':'Change',
+  '管理番号の頭文字':'Reference number prefix','変える':'Change','入金予定の番号の頭文字':'Income reference prefix',
+  '請求書のファイル名の先頭にも付きます。購入の頭文字とは別の文字にしてください。':'Also used at the start of invoice file names. Must differ from the purchase prefix.',
   '入金の項目':'Item','税抜金額':'Amount (excl. tax)','登録する':'Register','入金の請求書フォルダ':'Invoice folder for incoming payments','決める':'Set',
   '入金予定を足すときの請求書がここに入ります。入金予定を足す人（課長・経理）に、このフォルダを「編集者」で共有しておいてください。':
     'Invoices attached to expected payments go here. Share this folder as Editor with the people who add expected payments (managers and accounting).',
@@ -957,7 +958,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-29 v37';
+var BUILD = '2026-09-29 v38';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -1337,7 +1338,7 @@ function toArr(name, obj){
   return head.map(function(h){ return obj[h]!==undefined && obj[h]!==null ? String(obj[h]) : ''; });
 }
 async function appendRow(name, obj){
-  if(viaGas()) return await gas({action:'append', sheet:name, row:obj, prefix:idPrefix()});
+  if(viaGas()) return await gas({action:'append', sheet:name, row:obj, prefix:prefixFor(name)});
   await api(SS+ssId+'/values/'+A1(name,'A1')+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',
     {method:'POST', body: JSON.stringify({values:[toArr(name,obj)]})});
   return {};
@@ -1800,22 +1801,31 @@ function idPrefix(){
   if(/^[A-Z]{1,4}$/.test(p)) return p;
   return localeOf()==='in' ? 'BI' : 'B';
 }
-function localNextId(rows){
-  var p = idPrefix(), re = new RegExp('^'+p+'(\\d+)$'), mx = 0;
+/* 入金予定の番号の頭文字。請求書のファイル名の先頭にも付けて、証憑と1対1で結ぶ。 */
+function incomePrefix(){
+  var p = String((orgConfig && orgConfig.incomePrefix) || '').toUpperCase();
+  if(/^[A-Z]{1,4}$/.test(p) && p!==idPrefix()) return p;
+  return localeOf()==='in' ? 'RI' : 'R';
+}
+function prefixFor(sheet){ return sheet==='入金' ? incomePrefix() : idPrefix(); }
+function localNextId(rows, p){
+  p = p || idPrefix();
+  var re = new RegExp('^'+p+'(\\d+)$'), mx = 0;
   (rows || DB['購入']).forEach(function(e){
     var m = String(e.id||'').match(re); if(m) mx = Math.max(mx, Number(m[1]));
   });
   return p + String(mx+1).padStart(4,'0');
 }
-async function reserveId(){
-  var p = idPrefix();
+async function reserveId(sheet){
+  sheet = sheet==='入金' ? '入金' : '購入';
+  var p = prefixFor(sheet);
   if(viaGas()){
-    var r = await gas({action:'newid', prefix:p});
+    var r = await gas({action:'newid', prefix:p, sheet:sheet});
     // 書き込み役が古い版だと G で返ってくる。数字は重ならないので頭文字だけ付け替える。
     if(r && r.id) return r.id.indexOf(p)===0 && /^\d+$/.test(r.id.slice(p.length)) ? r.id : p + String(r.id).replace(/^\D+/, '');
   }
-  try{ return localNextId(await readSheet('購入')); }catch(e){}
-  return localNextId();
+  try{ return localNextId(await readSheet(sheet), p); }catch(e){}
+  return localNextId(DB[sheet], p);
 }
 /* 事業ごとの必要証憑。設定ファイルで足せる。 */
 function projectEvidence(p){
@@ -2135,9 +2145,10 @@ function renderIncome(){
     tile('確認してほしい', cnt(rows.filter(taxOdd).length), '税抜と税込の差');
   if(!rows.length){ $('income-list').innerHTML='<div class="empty">まだ入金予定がありません。</div>'; return; }
   $('income-list').innerHTML = '<div class="tablewrap"><table><thead><tr>'+
-    '<th>記入日</th><th>担当</th><th>部門</th><th>項目</th><th>税込</th><th>税抜</th><th>振込期日</th><th>請求書</th><th>状態</th><th></th>'+
+    '<th>No</th><th>記入日</th><th>担当</th><th>部門</th><th>項目</th><th>税込</th><th>税抜</th><th>振込期日</th><th>請求書</th><th>状態</th><th></th>'+
     '</tr></thead><tbody>' + rows.map(function(r){
-      return '<tr><td class="mono">'+md(r['記入日時'])+'</td><td>'+esc(r['記入者'])+'</td><td>'+esc(r['部門'])+'</td>'+
+      return '<tr><td class="mono">'+esc(/^I\d{10,}$/.test(r.id||'') ? '—' : (r.id||''))+'</td>'+
+        '<td class="mono">'+md(r['記入日時'])+'</td><td>'+esc(r['記入者'])+'</td><td>'+esc(r['部門'])+'</td>'+
         '<td class="name">'+esc(r['項目'])+(taxOdd(r)?'<small>税抜と税込の差が大きいです</small>':'')+'</td>'+
         '<td class="num">'+num(r['税込']).toLocaleString('ja-JP')+'</td>'+
         '<td class="num">'+num(r['税抜']).toLocaleString('ja-JP')+'</td>'+
@@ -2183,14 +2194,15 @@ function incomeEvCell(r){
   return h || '—';
 }
 function safeName(s){ return String(s||'').replace(/[\\/:*?"<>|]/g,'_').slice(0,80); }
-async function uploadIncomeFiles(files, due, title){
+async function uploadIncomeFiles(files, id, due, title){
   var folder = incomeFolder();
   if(!folder) throw new Error(T('請求書の入れ先が決まっていません。設定画面の「入金の請求書フォルダ」にフォルダのURLを貼ってください。',
                                 'No invoice folder is set. Paste the folder URL in Settings.'));
   var links = [];
   for(var i=0;i<files.length;i++){
     var f = files[i];
-    var named = new File([f], safeName(ymd(due)+'_'+title)+'_'+f.name, {type:f.type});
+    // 番号を先頭に付ける。同じ項目名・同じ期日でも、番号で入金予定と1対1に結べる
+    var named = new File([f], safeName(id+'_'+ymd(due)+'_'+title)+'_'+f.name, {type:f.type});
     var up = await uploadTo(folder, named);
     links.push('https://drive.google.com/file/d/'+up.id+'/view');
   }
@@ -2225,11 +2237,13 @@ async function addIncome(){
   if(miss.length){ $('i-err').innerHTML = '<div class="err">'+esc(miss.join(isEn()?', ':'・'))+esc(T(' が空です。',' is required.'))+'</div>'; return; }
   var btn = $('btn-income-save'); btn.disabled = true; btn.textContent = T('登録しています…','Saving…');
   try{
-    var links = files.length ? await uploadIncomeFiles(files, due, title) : [];
-    var r = {id:'I'+Date.now(), '記入日時':nowStr(), '記入者':me.name, '部門':dept, '種別':'売上',
+    var id = await reserveId('入金');
+    var links = files.length ? await uploadIncomeFiles(files, id, due, title) : [];
+    var r = {id:id, '記入日時':nowStr(), '記入者':me.name, '部門':dept, '種別':'売上',
              '項目':title, '税込':gross, '税抜':net || Math.round(gross/(1+TAX)), '振込期日':ymd(due),
              '証憑':links.join('\n')};
-    await appendRow('入金', r);
+    var saved = await appendRow('入金', r);
+    if(saved && saved.id && saved.id !== r.id) r.id = saved.id;
     await logAudit('入金予定を追加', r.id, '', title+(links.length?(' 請求書'+links.length+'件'):''));
     toast(links.length ? T('入金予定と請求書を登録しました','Registered with invoice') : T('入金予定を足しました','Registered'));
     closeIncomeForm();
@@ -2254,7 +2268,7 @@ async function onIncomeLaterPicked(){
   if(!files.length || !r) return;
   busy(T('請求書を上げています…','Uploading…'));
   try{
-    var links = await uploadIncomeFiles(files, r['振込期日'], r['項目']);
+    var links = await uploadIncomeFiles(files, r.id, r['振込期日'], r['項目']);
     var before = r['証憑'] || '';
     r['証憑'] = evLinks(before).concat(links).join('\n');
     await saveRow('入金', r);
@@ -3004,7 +3018,12 @@ function renderSettings(){
         '<button class="btn ghost sm" id="btn-id-prefix">変える</button>'+
         '<span class="mono" style="color:var(--muted)">'+esc(T('番号の形：','Format: '))+esc(idPrefix())+'0001</span></div>'+
         '<div class="hint">英字1〜4文字。過去に使った No・t・g・G・MM は使えません。'+
-        '変えると、これから出す番号から変わります。すでに振った番号はそのままです。</div></div>'
+        '変えると、これから出す番号から変わります。すでに振った番号はそのままです。</div></div>'+
+        '<div class="field" style="margin-top:10px"><label for="inc-prefix">入金予定の番号の頭文字</label>'+
+        '<div class="toolbar"><input type="text" id="inc-prefix" maxlength="4" value="'+esc(incomePrefix())+'" style="max-width:120px;text-transform:uppercase">'+
+        '<button class="btn ghost sm" id="btn-inc-prefix">変える</button>'+
+        '<span class="mono" style="color:var(--muted)">'+esc(T('番号の形：','Format: '))+esc(incomePrefix())+'0001</span></div>'+
+        '<div class="hint">請求書のファイル名の先頭にも付きます。購入の頭文字とは別の文字にしてください。</div></div>'
       : '')+
     (isAdmin(me.email)
       ? '<div class="field" style="margin-top:14px"><label for="inc-folder">入金の請求書フォルダ</label>'+
@@ -3015,6 +3034,25 @@ function renderSettings(){
         '<div class="hint">入金予定を足すときの請求書がここに入ります。入金予定を足す人（課長・経理）に、このフォルダを「編集者」で共有しておいてください。</div></div>'
       : '')+
     (isAdmin(me.email) ? gasBox() : '');
+  var ipf = $('btn-inc-prefix');
+  if(ipf) ipf.onclick = async function(){
+    var v = String($('inc-prefix').value||'').trim().toUpperCase();
+    if(!/^[A-Z]{1,4}$/.test(v)){ toast(T('英字1〜4文字で入れてください','Use 1 to 4 letters'), true); return; }
+    if(USED_PREFIXES.indexOf(v)>=0){ toast(T('過去の番号と重なるので使えません（No・t・g・G・MM）','Already used in past numbering'), true); return; }
+    if(v===idPrefix()){ toast(T('購入の頭文字と同じなので使えません','Same as the purchase prefix'), true); return; }
+    if(v===incomePrefix()) return;
+    if(!confirm(T('入金予定の番号の頭文字を「'+v+'」にします。全員に効きます。よろしいですか。',
+                  'Change the income prefix to "'+v+'" for everyone?'))) return;
+    this.disabled = true;
+    try{
+      var before = incomePrefix();
+      orgConfig.incomePrefix = v;
+      await saveConfig();
+      await logAudit('入金予定の番号の頭文字', v, before, v);
+      toast(T('変えました。','Changed.'));
+      renderSettings();
+    }catch(e){ toast(T('変えられませんでした：','Could not change: ')+e.message, true); this.disabled = false; }
+  };
   var ifb = $('btn-inc-folder');
   if(ifb) ifb.onclick = async function(){
     var id = idFromUrl($('inc-folder').value);
@@ -3036,6 +3074,7 @@ function renderSettings(){
     var v = String($('id-prefix').value||'').trim().toUpperCase();
     if(!/^[A-Z]{1,4}$/.test(v)){ toast(T('英字1〜4文字で入れてください','Use 1 to 4 letters'), true); return; }
     if(USED_PREFIXES.indexOf(v)>=0){ toast(T('過去の番号と重なるので使えません（No・t・g・G・MM）','Already used in past numbering'), true); return; }
+    if(v===incomePrefix()){ toast(T('入金予定の頭文字と同じなので使えません','Same as the income prefix'), true); return; }
     if(v===idPrefix()) return;
     if(!confirm(T('管理番号の頭文字を「'+v+'」にします。これから出す番号から変わり、全員に効きます。よろしいですか。',
                   'Change the prefix to "'+v+'" for everyone from the next entry?'))) return;
