@@ -519,7 +519,7 @@
               <button class="btn ghost" id="btn-draft">下書きで保存</button>
             </div>
             <div class="routebar" id="routebar">
-              <b>記入</b><span class="ar">→</span><span>課長のチェック</span><span class="ar">→</span>
+              <b>記入</b><span class="ar">→</span><span>承認者のチェック</span><span class="ar">→</span>
               <span>社長のチェック <span class="pill p-mute" id="pres-pill">今回は不要</span></span><span class="ar">→</span>
               <span>経理・支払</span>
             </div>
@@ -761,14 +761,14 @@ var EN = {
   '立替の申請':'Employee reimbursement','これから買う（事前申請）':'Buying later (advance request)','もう買った（事後精算）':'Already bought (reimbursement)',
   '事前に出しておけば、買ったあとに領収書を上げるだけで返金まで進みます。':'Submit in advance, then just upload the receipt after buying and the refund will proceed.',
   '発注した日':'Order date','納品予定日':'Expected delivery date','検収日（納品された日）':'Acceptance date (date delivered)','納品後に入れます。あとから足せます。':'Fill in after delivery. Can be added later.',
-  'チェックに出す':'Submit for review','下書きで保存':'Save as draft','記入':'Entry','課長のチェック':'Manager review','社長のチェック':'President review','今回は不要':'Not needed this time','必要になります':'Will be required','経理・支払':'Accounting / payment',
+  'チェックに出す':'Submit for review','下書きで保存':'Save as draft','記入':'Entry','承認者のチェック':'Approver review','社長のチェック':'President review','今回は不要':'Not needed this time','必要になります':'Will be required','経理・支払':'Accounting / payment',
   '保存中…':'Saving…','が空です。埋めてから出してください。':'is required. Please fill it in before submitting.','保存できませんでした。':'Could not save.','下書きで保存しました':'Saved as draft','をチェックに出しました':'submitted for review',
   // 一覧・状態
   'No':'No','記入日':'Date','税込':'Incl. Tax','いまどこ':'Status','件':'','足りないものがあります。':'Some items are missing.','を直してください。':'need your attention.','見る':'View',
   'まだ何も出していません。下の欄から記入してください。':'Nothing submitted yet. Use the form below.','差し戻し：':'Returned: ','がまだです':' still missing','直して出す':'Fix and resubmit','取り下げる':'Withdraw','証憑を上げる':'Upload evidence','出す':'Submit',
   '出したあとは直せません。チェックの前なら取り下げ、差し戻されたら直して出し直しです。':'Entries cannot be edited after submission. Withdraw before review, or fix and resubmit if returned.',
   '差し戻し':'Returned','下書き':'Draft','チェック待ち':'Awaiting review','社長待ち':'Awaiting president','取り下げ':'Withdrawn','支払済':'Paid','領収書待ち':'Awaiting receipt','返金待ち':'Awaiting refund','支払待ち':'Awaiting payment',
-  '一般ユーザ':'User','課長':'Manager','経理':'Accounting','社長':'President',
+  '一般ユーザ':'User','承認者':'Approver','経理':'Accounting','社長':'President',
   // 証憑
   '見積書':'Quotation','発注書':'Purchase Order','納品書':'Delivery Note','請求書':'Invoice','領収書':'Receipt','振込証憑':'Transfer Proof','その他':'Other',
   '請求書か領収書':'Invoice or Receipt','項目':'Account Item','税込金額':'Amount (Incl. Tax)',
@@ -784,7 +784,7 @@ Object.assign(EN, {
   'チェックする':'Review','チェック':'Review',
   '自分の課に出されたものが溜まります。通してよければ1回押すだけで経理へ回ります。':
     'Entries from your department collect here. One click passes them to accounting.',
-  '課長と経理だけが見る画面です。自分の課に出されたものが、ここに溜まります。通してよければ1回押すだけで経理へ回ります。':
+  '承認者と経理だけが見る画面です。担当の部署の人が出したものが、ここに溜まります。通してよければ1回押すだけで経理へ回ります。':
     'Only managers and accounting see this. Entries from your department collect here, and one click passes them to accounting.',
   '通すと社長へ回ります':'Passing this sends it to the CEO',
   '社長のチェックが必要':'Needs CEO approval',
@@ -841,7 +841,7 @@ Object.assign(EN, {
   '管理番号の頭文字':'Reference number prefix','変える':'Change','入金予定の番号の頭文字':'Income reference prefix',
   '請求書のファイル名の先頭にも付きます。購入の頭文字とは別の文字にしてください。':'Also used at the start of invoice file names. Must differ from the purchase prefix.',
   '入金の項目':'Item','税抜金額':'Amount (excl. tax)','登録する':'Register','入金の請求書フォルダ':'Invoice folder for incoming payments','決める':'Set',
-  '入金予定を足すときの請求書がここに入ります。入金予定を足す人（課長・経理）に、このフォルダを「編集者」で共有しておいてください。':
+  '入金予定を足すときの請求書がここに入ります。入金予定を足す人（承認者・経理）に、このフォルダを「編集者」で共有しておいてください。':
     'Invoices attached to expected payments go here. Share this folder as Editor with the people who add expected payments (managers and accounting).',
   '英字1〜4文字。過去に使った No・t・g・G・MM は使えません。変えると、これから出す番号から変わります。すでに振った番号はそのままです。':
     '1 to 4 letters. No, t, g, G and MM were used in the past and cannot be used. A change applies to new entries only; existing numbers stay as they are.',
@@ -885,11 +885,11 @@ Object.assign(EN, {
     'Admins get the accounting role. You can register someone by email before they have ever signed in. This list is kept in the company settings file on Google Drive.',
   '管理者を増やせるのは管理者だけです。':'Only admins can add admins.',
   '管理者にする':'Make admin','外す':'Remove','オーナー':'Owner','あなた':'you',
-  'メール':'Email','名前':'Name','ロール':'Role','一般ユーザ':'Staff','課長':'Manager','経理':'Accounting','社長':'CEO',
-  '課長は「部門」に担当の課を書いてください。複数あるときは読点で区切ります。':
+  'メール':'Email','名前':'Name','ロール':'Role','一般ユーザ':'Staff','承認者':'Approver','経理':'Accounting','社長':'CEO',
+  '「部門」には、一般ユーザは所属の部署、承認者はチェックする部署を書きます。複数あるときは読点で区切ります。承認者は、書いた部署の人が出したものをチェックします。':
     'For a manager, enter the department they look after. Separate several with commas.',
   'ログインしたことがない人も、先に登録しておけます。':'You can register people who have never signed in.',
-  '部門（課長のとき）':'Department (for managers)','課長は担当の課':'Department the manager looks after',
+  '部署':'Department','所属／担当の部署':'Own / assigned department',
   'メールアドレス':'Email address','この画面の版':'App version','スプレッドシート':'Spreadsheet',
   '証憑フォルダ':'Evidence folder','スプレッドシートを変える':'Change spreadsheet',
   '新しいスプレッドシートのURLを貼る':'Paste the new spreadsheet URL','切り替える':'Switch',
@@ -958,7 +958,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-29 v39';
+var BUILD = '2026-09-29 v40';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -1619,9 +1619,29 @@ function bumpMaster(list, value){
   m['最終使用'] = today();
   return saveRow('マスタ', m);
 }
+function deptsOf(s){ return String(s||'').split(/[,、，]/).map(function(x){ return x.trim(); }).filter(Boolean); }
+/* メール → その人の部署（人とロールの「部門」欄） */
+function personDepts(){
+  var m = {};
+  (DB['人']||[]).forEach(function(u){
+    var e = String(u['メール']||'').toLowerCase();
+    if(e && u['ロール']!=='off') m[e] = deptsOf(u['部門']);
+  });
+  return m;
+}
+/* 承認者がチェックする記入か。記入した人の部署か、費用負担部門が担当部署に入っていれば当たる。
+   自分の記入は当たらない（自分で自分を承認しない。経理か別の承認者が見る）。書き込み役の inCharge と同じ。 */
+function inMyCharge(e){
+  var mine = myDepts();
+  if(me.role!=='mgr' || !mine.length) return false;
+  var who = String(e['記入者メール']||'').toLowerCase();
+  if(who === me.email.toLowerCase()) return false;
+  if(mine.indexOf(e['部門'])>=0) return true;
+  return (personDepts()[who]||[]).some(function(d){ return mine.indexOf(d)>=0; });
+}
 function myDepts(){
   if(me.role==='acc' || me.role==='pres') return mvals('部門').map(function(m){ return m['値']; });
-  if(me.dept) return me.dept.split(/[,、]/).map(function(s){ return s.trim(); }).filter(Boolean);
+  if(me.dept) return deptsOf(me.dept);
   return [];
 }
 
@@ -1790,7 +1810,7 @@ async function uploadTo(folderId, file, retried){
    手元のデータから数えてはいけない。一般ユーザには他人の記入を渡していないので
    （渡さないのはわざと。ほかの人の買い物が見えないようにするため）、
    手元の一番大きい番号はいつも自分の分だけになり、初めての人は必ず G0001 になる。
-   課長も自分の課の分しか見えないので同じことが起きる。
+   承認者も担当の部署の分しか見えないので同じことが起きる。
    書き込み役はシート全部を見られるので、そちらで取り置く。
    書き込み役を使わない設定のときだけ、シートを読み直してから数える。 */
 /* 管理番号の頭文字。過去の手作業の番号（No / t / g / G / MM）と重ならないものにする。
@@ -2058,7 +2078,7 @@ function renderMy(){
 function canCheck(e){
   if(me.role==='acc') return e['状態']===ST.WAIT || e['状態']===ST.PRES;
   if(me.role==='pres') return e['状態']===ST.PRES;
-  if(me.role==='mgr') return e['状態']===ST.WAIT && myDepts().indexOf(e['部門'])>=0;
+  if(me.role==='mgr') return e['状態']===ST.WAIT && inMyCharge(e);
   return false;
 }
 function renderApprove(){
@@ -2586,7 +2606,7 @@ function findGaps(){
   var out = [];
   var scope = function(e){
     if(me.role==='acc' || me.role==='pres') return true;
-    if(me.role==='mgr') return myDepts().indexOf(e['部門'])>=0 || (e['記入者メール']||'').toLowerCase()===me.email.toLowerCase();
+    if(me.role==='mgr') return inMyCharge(e) || (e['記入者メール']||'').toLowerCase()===me.email.toLowerCase();
     return (e['記入者メール']||'').toLowerCase()===me.email.toLowerCase();
   };
   DB['購入'].forEach(function(e){
@@ -2821,7 +2841,7 @@ function renderMaster(){
 }
 
 /* ==================== 設定 ==================== */
-var ROLE_NAME = {user:'一般ユーザ', mgr:'課長', acc:'経理', pres:'社長'};
+var ROLE_NAME = {user:'一般ユーザ', mgr:'承認者', acc:'経理', pres:'社長'};
 function renderAdmins(){
   if(!orgConfig || !orgConfig.spreadsheetId){
     $('admin-box').innerHTML =
@@ -3035,7 +3055,7 @@ function renderSettings(){
         'value="'+esc(incomeFolder() ? 'https://drive.google.com/drive/folders/'+incomeFolder() : '')+'" style="min-width:320px">'+
         '<button class="btn ghost sm" id="btn-inc-folder">決める</button>'+
         (incomeFolder() ? '<a href="https://drive.google.com/drive/folders/'+esc(incomeFolder())+'" target="_blank" rel="noopener">開く</a>' : '')+'</div>'+
-        '<div class="hint">入金予定を足すときの請求書がここに入ります。入金予定を足す人（課長・経理）に、このフォルダを「編集者」で共有しておいてください。</div></div>'
+        '<div class="hint">入金予定を足すときの請求書がここに入ります。入金予定を足す人（承認者・経理）に、このフォルダを「編集者」で共有しておいてください。</div></div>'
       : '')+
     (isAdmin(me.email) ? gasBox() : '');
   var ipf = $('btn-inc-prefix');
@@ -3117,9 +3137,10 @@ function renderSettings(){
     (!hasAcc ? '<div class="err">経理ロールの人がまだいません。いまは誰でもロールを変えられます。'+
       '最初に経理の方を決めてください。</div>' : '')+
     '<div class="tablewrap" style="box-shadow:none"><table><thead><tr>'+
-    '<th>名前</th><th>メール</th><th>ロール</th><th>部門</th><th></th></tr></thead><tbody>'+
+    '<th>名前</th><th>メール</th><th>ロール</th><th>部署</th><th></th></tr></thead><tbody>'+
     DB['人'].filter(function(u){ return u['ロール'] !== 'off'; }).map(function(u){
       var mine = (u['メール']||'').toLowerCase()===me.email.toLowerCase();
+      var warn = personWarn(u);
       return '<tr'+(mine?' style="background:var(--accent-soft)"':'')+'><td>'+esc(u['名前'])+(mine?'　<span class="pill p-info">あなた</span>':'')+'</td>'+
         '<td class="mono" style="font-size:.9em">'+esc(u['メール'])+'</td>'+
         '<td>'+(canEdit
@@ -3128,23 +3149,47 @@ function renderSettings(){
             '</select>'
           : esc(ROLE_NAME[u['ロール']]||u['ロール']))+'</td>'+
         '<td>'+(canEdit
-          ? '<input type="text" data-user="'+u._row+'" data-f="部門" value="'+esc(u['部門'])+'" style="width:180px;font-size:.8rem;padding:3px 8px" placeholder="課長は担当の課">'
-          : esc(u['部門']||'—'))+'</td>'+
+          ? '<input type="text" data-user="'+u._row+'" data-f="部門" value="'+esc(u['部門'])+'" style="width:180px;font-size:.8rem;padding:3px 8px" placeholder="所属／担当の部署">'
+          : esc(u['部門']||'—'))+
+          (warn ? '<div class="hint" style="color:var(--warn);margin-top:3px">'+esc(warn)+'</div>' : '')+'</td>'+
         '<td>'+(canEdit && !mine ? '<button class="btn ghost sm" data-delperson="'+u._row+'">'+
           (isEn()?'Remove':'外す')+'</button>' : '')+'</td></tr>';
     }).join('')+'</tbody></table></div>'+
     '<p class="hint" style="margin-top:10px">'+
-    '課長は「部門」に担当の課を書いてください。複数あるときは読点で区切ります。'+
+    '「部門」には、一般ユーザは所属の部署、承認者はチェックする部署を書きます。複数あるときは読点で区切ります。承認者は、書いた部署の人が出したものをチェックします。'+
     (canEdit ? '' : 'ロールを変えられるのは経理だけです。')+'</p>'+
     (canEdit ? '<div class="toolbar" style="margin-top:14px">'+
       '<input type="text" id="person-new" placeholder="メールアドレス">'+
       '<select id="person-role">'+Object.keys(ROLE_NAME).map(function(r){
         return '<option value="'+r+'"'+(r==='mgr'?' selected':'')+'>'+ROLE_NAME[r]+'</option>'; }).join('')+'</select>'+
-      '<input type="text" id="person-dept" placeholder="部門（課長のとき）" style="width:190px">'+
+      '<input type="text" id="person-dept" placeholder="所属／担当の部署" style="width:190px">'+
       '<button class="btn sm" id="btn-person-add">足す</button></div>'+
       '<p class="hint" style="margin-top:6px">ログインしたことがない人も、先に登録しておけます。</p>' : '');
   var pb = $('btn-person-add');
   if(pb) pb.onclick = addPerson;
+}
+/* 人とロールの注意書き。承認者に回らない書き方をその場で知らせる。 */
+function personWarn(u){
+  var email = String(u['メール']||'').toLowerCase();
+  var live = DB['人'].filter(function(x){ return x['ロール']!=='off'; });
+  var mine = deptsOf(u['部門']);
+  if(u['ロール']==='mgr'){
+    if(!mine.length) return T('担当の部署が空です。この人には誰の記入も回りません。','No department set. Nothing will reach this approver.');
+    var master = mvals('部門').map(function(m){ return m['値']; });
+    var others = {};
+    live.forEach(function(x){ if(String(x['メール']||'').toLowerCase()!==email) deptsOf(x['部門']).forEach(function(d){ others[d]=1; }); });
+    var dead = mine.filter(function(d){ return !others[d] && master.indexOf(d)<0; });
+    return dead.length ? T('「'+dead.join('、')+'」の人がいません（書き方の違い？）','Nobody is in: '+dead.join(', ')) : '';
+  }
+  if(u['ロール']==='user'){
+    if(!mine.length) return T('部署が空です。この人の記入は経理だけがチェックします。','No department. Only accounting will review.');
+    var covered = live.some(function(x){
+      return x['ロール']==='mgr' && String(x['メール']||'').toLowerCase()!==email &&
+             deptsOf(x['部門']).some(function(d){ return mine.indexOf(d)>=0; });
+    });
+    return covered ? '' : T('この部署の承認者がいません。経理だけがチェックします。','No approver for this department. Only accounting will review.');
+  }
+  return '';
 }
 async function saveUser(row, field, value){
   var u = DB['人'].filter(function(x){ return x._row===row; })[0]; if(!u) return;
@@ -3217,7 +3262,7 @@ function setTab(name){
   });
 }
 function applyRole(){
-  var roleName = {user:tx('一般ユーザ'), mgr:tx('課長'), acc:tx('経理'), pres:tx('社長')};
+  var roleName = {user:tx('一般ユーザ'), mgr:tx('承認者'), acc:tx('経理'), pres:tx('社長')};
   $('whoami').hidden = false;
   $('whoami').innerHTML = esc(me.name) + '　<b>' + esc(roleName[me.role]||me.role) + '</b>' +
     (me.dept ? '　' + esc(me.dept) : '');

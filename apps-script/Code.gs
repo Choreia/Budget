@@ -127,8 +127,29 @@ function lookupPerson(email) {
     email: email,
     name: hit ? (hit['名前'] || email) : email.split('@')[0],
     role: role,
-    depts: String((hit && hit['部門']) || '').split(/[,、]/).map(trim).filter(nonEmpty)
+    depts: deptsOf(hit && hit['部門'])
   };
+}
+/* 部署の書き方。読点・カンマで区切れば複数。 */
+function deptsOf(s) { return String(s || '').split(/[,、，]/).map(trim).filter(nonEmpty); }
+/* メール → その人の部署（人とロールの「部門」欄） */
+function personDepts() {
+  var m = {};
+  readRows('人').forEach(function (u) {
+    var e = String(u['メール'] || '').toLowerCase();
+    if (e && u['ロール'] !== 'off') m[e] = deptsOf(u['部門']);
+  });
+  return m;
+}
+/* 承認者が見る・チェックする記入か。
+   記入した人の部署が担当部署に入っている（名波さんの考え方＝同じ部署の人の記入をチェックする）か、
+   記入の費用負担部門が担当部署に入っていれば当たる。自分の記入は当たらない（自分で自分を承認しない）。 */
+function inCharge(me, entry, pd) {
+  if (!me.depts.length) return false;
+  var who = String(entry['記入者メール'] || '').toLowerCase();
+  if (who === me.email) return false;
+  if (me.depts.indexOf(String(entry['部門'] || '')) >= 0) return true;
+  return (pd[who] || []).some(function (d) { return me.depts.indexOf(d) >= 0; });
 }
 function trim(s) { return String(s).trim(); }
 function nonEmpty(s) { return !!s; }
@@ -264,15 +285,16 @@ function filterOwn(v, name, me) {
   return keep;
 }
 function filterDept(v, me) {
-  if (!v.length || !me.depts.length) return v;
+  if (!v.length) return v;
   var head = v[0];
   var dc = head.indexOf('部門'), ec = head.indexOf('記入者メール');
-  if (dc < 0) return v;
+  var pd = personDepts();
   var keep = [head];
   for (var i = 1; i < v.length; i++) {
-    var mine = me.depts.indexOf(String(v[i][dc])) >= 0 ||
-               (ec >= 0 && String(v[i][ec] || '').toLowerCase() === me.email);
-    keep.push(mine ? v[i] : blankRow(head.length, i));
+    var entry = { '部門': dc >= 0 ? v[i][dc] : '', '記入者メール': ec >= 0 ? v[i][ec] : '' };
+    // 担当部署が空の承認者は、自分の記入だけ（以前は全員分が見えてしまっていた）
+    var ok = String(entry['記入者メール'] || '').toLowerCase() === me.email || inCharge(me, entry, pd);
+    keep.push(ok ? v[i] : blankRow(head.length, i));
   }
   return keep;
 }
@@ -365,14 +387,18 @@ function canWrite(me, name, row, old) {
     if (!old) return null;                      // 新しく出すのは誰でもできる
     var mine = String(old['記入者メール'] || '').toLowerCase() === me.email;
     var st = String(old['状態'] || '');
+    var next = String(row['状態'] || '');
+    if (mine && next !== st && ['承認済', '社長待ち', '支払済'].indexOf(next) >= 0 && me.role !== 'pres') {
+      return '自分の記入は自分で承認できません。';
+    }
     if (mine && (st === '下書き' || st === '差し戻し' || st === 'チェック待ち')) return null;
-    if (me.role === 'mgr' && me.depts.indexOf(String(old['部門'])) >= 0) return null;
+    if (me.role === 'mgr' && inCharge(me, old, personDepts())) return null;
     if (me.role === 'pres') return null;
     return '出したあとは直せません。経理に直してもらってください。';
   }
   if (name === '入金') {
     if (me.role === 'mgr' || me.role === 'pres') return null;
-    return '入金を書けるのは課長と経理です。';
+    return '入金を書けるのは承認者と経理です。';
   }
   return null;
 }
