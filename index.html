@@ -544,6 +544,46 @@
           <span class="spacer"></span>
           <button class="btn ghost sm" id="btn-income-csv">CSVで出す</button>
         </div>
+        <div class="card" id="income-form" hidden style="margin-bottom:18px">
+          <h3>入金予定を足す</h3>
+          <div class="body">
+            <div class="field">
+              <label for="i-title">入金の項目<span class="req">必須</span></label>
+              <input type="text" id="i-title" placeholder="例：やさいバス食堂 業務委託費用 9月分">
+            </div>
+            <div class="row2">
+              <div class="field">
+                <label for="i-gross">税込金額<span class="req">必須</span></label>
+                <input type="text" id="i-gross" class="mono" inputmode="numeric" placeholder="0">
+              </div>
+              <div class="field">
+                <label for="i-net">税抜金額</label>
+                <input type="text" id="i-net" class="mono" inputmode="numeric" placeholder="空なら自動で計算">
+              </div>
+            </div>
+            <div class="row2">
+              <div class="field">
+                <label for="i-due">振込期日<span class="req">必須</span></label>
+                <input type="date" id="i-due">
+              </div>
+              <div class="field">
+                <label for="i-dept">部門</label>
+                <select id="i-dept"></select>
+              </div>
+            </div>
+            <div class="field">
+              <label for="i-files">請求書</label>
+              <input type="file" id="i-files" multiple accept=".pdf,image/*,.xlsx,.xls,.docx">
+              <div class="hint" id="i-files-hint">経理の請求書フォルダに入ります。あとからでも上げられます。</div>
+            </div>
+            <div id="i-err"></div>
+            <div class="actions">
+              <button class="btn" id="btn-income-save">登録する</button>
+              <button class="btn ghost" id="btn-income-cancel">やめる</button>
+            </div>
+          </div>
+        </div>
+        <input type="file" id="i-later" multiple accept=".pdf,image/*,.xlsx,.xls,.docx" hidden>
         <div id="income-list"><div class="loading">読み込み中…</div></div>
       </section>
 
@@ -799,6 +839,9 @@ Object.assign(EN, {
   '課':'Department','重み':'Weight','比率':'Share',
   'やめました':'Stopped','原価区分':'Cost type','製造（製）':'Manufacturing',
   '管理番号の頭文字':'Reference number prefix','変える':'Change',
+  '入金の項目':'Item','税抜金額':'Amount (excl. tax)','登録する':'Register','入金の請求書フォルダ':'Invoice folder for incoming payments','決める':'Set',
+  '入金予定を足すときの請求書がここに入ります。入金予定を足す人（課長・経理）に、このフォルダを「編集者」で共有しておいてください。':
+    'Invoices attached to expected payments go here. Share this folder as Editor with the people who add expected payments (managers and accounting).',
   '英字1〜4文字。過去に使った No・t・g・G・MM は使えません。変えると、これから出す番号から変わります。すでに振った番号はそのままです。':
     '1 to 4 letters. No, t, g, G and MM were used in the past and cannot be used. A change applies to new entries only; existing numbers stay as they are.',
   '按分の内訳をCSV':'Allocation breakdown CSV',
@@ -914,7 +957,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-28 v36';
+var BUILD = '2026-09-29 v37';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -1721,7 +1764,7 @@ async function shareInDomain(fileId){
       {method:'POST', body: JSON.stringify({type:'domain', role:'writer', domain:DOMAIN})});
   }catch(e){ /* 個人アカウントや組織の制限。リンクは残るので手動共有で足りる */ }
 }
-async function uploadTo(folderId, file){
+async function uploadTo(folderId, file, retried){
   var meta = {name:file.name, parents:[folderId]};
   var boundary = '-------cb'+Date.now();
   var head = '--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(meta)+
@@ -1730,7 +1773,14 @@ async function uploadTo(folderId, file){
   var blob = new Blob([head, file, tail], {type:'multipart/related; boundary='+boundary});
   var res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id',
     {method:'POST', headers:{'Authorization':'Bearer '+accessToken}, body: blob});
-  if(!res.ok) throw new Error('アップロードに失敗しました');
+  if(res.status===401 && !retried && tokenClient && me.email){
+    await renewToken();
+    return uploadTo(folderId, file, true);
+  }
+  if(res.status===403 || res.status===404)
+    throw new Error(T('このフォルダに入れる権限がありません。フォルダの持ち主に「編集者」で共有してもらってください。',
+                      'You do not have permission to add files to this folder. Ask the owner to share it with you as an editor.'));
+  if(!res.ok) throw new Error(T('アップロードに失敗しました','Upload failed')+'（'+res.status+'）');
   return res.json();
 }
 
@@ -2085,13 +2135,14 @@ function renderIncome(){
     tile('確認してほしい', cnt(rows.filter(taxOdd).length), '税抜と税込の差');
   if(!rows.length){ $('income-list').innerHTML='<div class="empty">まだ入金予定がありません。</div>'; return; }
   $('income-list').innerHTML = '<div class="tablewrap"><table><thead><tr>'+
-    '<th>記入日</th><th>担当</th><th>部門</th><th>項目</th><th>税込</th><th>税抜</th><th>振込期日</th><th>状態</th><th></th>'+
+    '<th>記入日</th><th>担当</th><th>部門</th><th>項目</th><th>税込</th><th>税抜</th><th>振込期日</th><th>請求書</th><th>状態</th><th></th>'+
     '</tr></thead><tbody>' + rows.map(function(r){
       return '<tr><td class="mono">'+md(r['記入日時'])+'</td><td>'+esc(r['記入者'])+'</td><td>'+esc(r['部門'])+'</td>'+
         '<td class="name">'+esc(r['項目'])+(taxOdd(r)?'<small>税抜と税込の差が大きいです</small>':'')+'</td>'+
         '<td class="num">'+num(r['税込']).toLocaleString('ja-JP')+'</td>'+
         '<td class="num">'+num(r['税抜']).toLocaleString('ja-JP')+'</td>'+
-        '<td class="mono">'+ymd(r['振込期日'])+'</td><td>'+incomeState(r)+'</td>'+
+        '<td class="mono">'+ymd(r['振込期日'])+'</td>'+
+        '<td>'+incomeEvCell(r)+'</td><td>'+incomeState(r)+'</td>'+
         '<td>'+(!r['入金確認日'] && me.role==='acc' ? '<button class="btn sm" data-paid="'+r._row+'">入金を確認</button>' : '')+'</td></tr>';
     }).join('') + '</tbody></table></div>';
 }
@@ -2113,20 +2164,105 @@ var EV_EN = {'見積書':'Quotation','発注書':'Purchase order','納品書':'D
 function evName(t){ return isEn() ? (EV_EN[t]||t) : t; }
 function evNames(a){ return a.map(evName).join(isEn()?', ':'・'); }
 
+/* ==================== 入金予定の請求書 ====================
+   名波さん依頼（2026-09-29）。入金予定を足すときに請求書も一緒に上げる。
+   入れ先は経理の請求書フォルダ（設定ファイルの incomeFolderId。設定画面で貼る）。
+   ファイル名の頭に 振込期日と項目 を付けて、フォルダで並べたときに探せるようにする。
+   シートの「証憑」列にはファイルへのリンクを入れる（複数なら改行区切り）。 */
+function incomeFolder(){ return (orgConfig && orgConfig.incomeFolderId) || ''; }
+function evLinks(v){ return String(v||'').split(/\s+/).filter(function(x){ return /^https?:/.test(x); }); }
+function canEditIncome(){ return me.role==='acc' || me.role==='mgr' || me.role==='pres'; }
+function incomeEvCell(r){
+  var ls = evLinks(r['証憑']);
+  var h = ls.map(function(u, i){
+    return '<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(T('開く','Open'))+(ls.length>1?(i+1):'')+'</a>';
+  }).join(' ');
+  if(canEditIncome())
+    h += (h?' ':'')+'<button class="btn ghost sm" data-incev="'+r._row+'">'+
+         esc(ls.length ? T('足す','Add') : T('上げる','Upload'))+'</button>';
+  return h || '—';
+}
+function safeName(s){ return String(s||'').replace(/[\\/:*?"<>|]/g,'_').slice(0,80); }
+async function uploadIncomeFiles(files, due, title){
+  var folder = incomeFolder();
+  if(!folder) throw new Error(T('請求書の入れ先が決まっていません。設定画面の「入金の請求書フォルダ」にフォルダのURLを貼ってください。',
+                                'No invoice folder is set. Paste the folder URL in Settings.'));
+  var links = [];
+  for(var i=0;i<files.length;i++){
+    var f = files[i];
+    var named = new File([f], safeName(ymd(due)+'_'+title)+'_'+f.name, {type:f.type});
+    var up = await uploadTo(folder, named);
+    links.push('https://drive.google.com/file/d/'+up.id+'/view');
+  }
+  return links;
+}
+function openIncomeForm(){
+  var box = $('income-form');
+  var depts = myDepts().length ? myDepts() : mvals('部門').map(function(m){ return m['値']; });
+  $('i-dept').innerHTML = depts.map(function(v){ return '<option>'+esc(v)+'</option>'; }).join('') +
+    '<option>'+esc(T('その他','Other'))+'</option>';
+  $('i-err').innerHTML = '';
+  $('i-files-hint').textContent = incomeFolder()
+    ? T('経理の請求書フォルダに入ります。あとからでも上げられます。','Goes into the accounting invoice folder. You can also add it later.')
+    : T('請求書の入れ先がまだ決まっていません（設定画面で経理が決めます）。いまは請求書なしで登録できます。',
+        'No invoice folder yet (accounting sets it in Settings). You can register without it for now.');
+  box.hidden = false;
+  $('i-title').focus();
+}
+function closeIncomeForm(){
+  $('income-form').hidden = true;
+  ['i-title','i-gross','i-net','i-due'].forEach(function(id){ $(id).value=''; });
+  $('i-files').value = '';
+}
 async function addIncome(){
-  var title = prompt(T('入金の項目（例：やさいバス食堂 業務委託費用 9月分）',
-                       'What is this payment for? (e.g. Service fee, September)')); if(!title) return;
-  var gross = prompt(T('税込金額', 'Amount including tax')); if(gross===null) return;
-  var net = prompt(T('税抜金額（分からなければ空でOK）',
-                     'Amount excluding tax (leave blank if you are not sure)'));
-  var due = prompt(T('振込期日（2026-09-30 の形）', 'Due date (as 2026-09-30)')); if(!due) return;
-  var dept = prompt(T('部門','Department'), myDepts()[0]||T('その他','Other')) || T('その他','Other');
-  var r = {id:'I'+Date.now(), '記入日時':nowStr(), '記入者':me.name, '部門':dept, '種別':'売上',
-           '項目':title, '税込':num(gross), '税抜':num(net)||Math.round(num(gross)/(1+TAX)), '振込期日':ymd(due)};
-  await appendRow('入金', r);
-  await logAudit('入金予定を追加', r.id, '', title);
-  toast('入金予定を足しました');
-  await loadAll(); renderAll();
+  var title = $('i-title').value.trim(), gross = num($('i-gross').value), net = num($('i-net').value);
+  var due = $('i-due').value, dept = $('i-dept').value || T('その他','Other');
+  var files = Array.prototype.slice.call($('i-files').files || []);
+  var miss = [];
+  if(!title) miss.push(T('入金の項目','Item'));
+  if(!gross) miss.push(T('税込金額','Amount incl. tax'));
+  if(!due)   miss.push(T('振込期日','Due date'));
+  if(miss.length){ $('i-err').innerHTML = '<div class="err">'+esc(miss.join(isEn()?', ':'・'))+esc(T(' が空です。',' is required.'))+'</div>'; return; }
+  var btn = $('btn-income-save'); btn.disabled = true; btn.textContent = T('登録しています…','Saving…');
+  try{
+    var links = files.length ? await uploadIncomeFiles(files, due, title) : [];
+    var r = {id:'I'+Date.now(), '記入日時':nowStr(), '記入者':me.name, '部門':dept, '種別':'売上',
+             '項目':title, '税込':gross, '税抜':net || Math.round(gross/(1+TAX)), '振込期日':ymd(due),
+             '証憑':links.join('\n')};
+    await appendRow('入金', r);
+    await logAudit('入金予定を追加', r.id, '', title+(links.length?(' 請求書'+links.length+'件'):''));
+    toast(links.length ? T('入金予定と請求書を登録しました','Registered with invoice') : T('入金予定を足しました','Registered'));
+    closeIncomeForm();
+    await loadAll(); renderAll();
+  }catch(ex){
+    $('i-err').innerHTML = '<div class="err">'+esc(T('登録できませんでした。','Could not register.'))+'<br>'+esc(ex.message)+'</div>';
+  }finally{
+    btn.disabled = false; btn.textContent = T('登録する','Register');
+  }
+}
+/* 登録したあとで請求書を上げる。押した直後にファイル選択を開く（押した直後でないと開けない）。 */
+var incomeLaterRow = null;
+function pickIncomeInvoice(row){
+  if(!incomeFolder()){ toast(T('請求書の入れ先が決まっていません（設定画面）','No invoice folder set (Settings)'), true); return; }
+  incomeLaterRow = row;
+  $('i-later').value = '';
+  $('i-later').click();
+}
+async function onIncomeLaterPicked(){
+  var files = Array.prototype.slice.call($('i-later').files || []);
+  var r = DB['入金'].filter(function(x){ return x._row===incomeLaterRow; })[0];
+  if(!files.length || !r) return;
+  busy(T('請求書を上げています…','Uploading…'));
+  try{
+    var links = await uploadIncomeFiles(files, r['振込期日'], r['項目']);
+    var before = r['証憑'] || '';
+    r['証憑'] = evLinks(before).concat(links).join('\n');
+    await saveRow('入金', r);
+    await logAudit('入金の請求書を追加', r.id, '', r['項目']+' '+links.length+'件');
+    toast(T('請求書を上げました','Invoice uploaded'));
+    await loadAll(); renderAll();
+  }catch(ex){ toast(T('上げられませんでした：','Could not upload: ')+ex.message, true); }
+  finally{ busy(false); }
 }
 async function confirmPaid(row){
   var r = DB['入金'].filter(function(x){ return x._row===row; })[0]; if(!r) return;
@@ -2565,7 +2701,8 @@ function renderGaps(){
         return '<tr><td class="name"><span class="mono">'+esc(x.id)+'</span> '+esc(x.title)+'<small>'+esc(x.sub)+'</small></td>'+
           '<td><span class="pill p-bad">'+esc(x.what)+'</span><div class="hint" style="margin-top:4px">'+esc(x.why)+'</div></td>'+
           '<td>'+esc(x.who)+'</td><td class="mono">'+days(x.days)+'</td>'+
-          '<td>'+(x.sheet==='購入' && x.kind==='証憑' ? '<button class="btn ghost sm" data-ev="'+x.row+'">証憑を上げる</button>' : '')+'</td></tr>';
+          '<td>'+(x.sheet==='購入' && x.kind==='証憑' ? '<button class="btn ghost sm" data-ev="'+x.row+'">証憑を上げる</button>'
+                 : x.sheet==='入金' && x.kind==='証憑' && canEditIncome() ? '<button class="btn ghost sm" data-incev="'+x.row+'">請求書を上げる</button>' : '')+'</td></tr>';
       }).join('')+'</tbody></table></div>';
   }
   var pe = (orgConfig && orgConfig.projectEvidence) || {};
@@ -2869,7 +3006,31 @@ function renderSettings(){
         '<div class="hint">英字1〜4文字。過去に使った No・t・g・G・MM は使えません。'+
         '変えると、これから出す番号から変わります。すでに振った番号はそのままです。</div></div>'
       : '')+
+    (isAdmin(me.email)
+      ? '<div class="field" style="margin-top:14px"><label for="inc-folder">入金の請求書フォルダ</label>'+
+        '<div class="toolbar"><input type="text" id="inc-folder" placeholder="https://drive.google.com/drive/folders/..." '+
+        'value="'+esc(incomeFolder() ? 'https://drive.google.com/drive/folders/'+incomeFolder() : '')+'" style="min-width:320px">'+
+        '<button class="btn ghost sm" id="btn-inc-folder">決める</button>'+
+        (incomeFolder() ? '<a href="https://drive.google.com/drive/folders/'+esc(incomeFolder())+'" target="_blank" rel="noopener">開く</a>' : '')+'</div>'+
+        '<div class="hint">入金予定を足すときの請求書がここに入ります。入金予定を足す人（課長・経理）に、このフォルダを「編集者」で共有しておいてください。</div></div>'
+      : '')+
     (isAdmin(me.email) ? gasBox() : '');
+  var ifb = $('btn-inc-folder');
+  if(ifb) ifb.onclick = async function(){
+    var id = idFromUrl($('inc-folder').value);
+    if(!id || id.length < 20){ toast(T('フォルダのURLを貼ってください','Paste the folder URL'), true); return; }
+    this.disabled = true;
+    try{
+      var f = await api('https://www.googleapis.com/drive/v3/files/'+id+'?fields=id,name,mimeType&supportsAllDrives=true');
+      if(f.mimeType !== 'application/vnd.google-apps.folder') throw new Error(T('フォルダではありません','Not a folder'));
+      var before = incomeFolder();
+      orgConfig.incomeFolderId = id;
+      await saveConfig();
+      await logAudit('入金の請求書フォルダ', f.name, before, id);
+      toast(T('入れ先を「'+f.name+'」にしました','Invoice folder set to "'+f.name+'"'));
+      renderSettings();
+    }catch(e){ toast(T('決められませんでした：','Could not set: ')+e.message, true); this.disabled = false; }
+  };
   var ipb = $('btn-id-prefix');
   if(ipb) ipb.onclick = async function(){
     var v = String($('id-prefix').value||'').trim().toUpperCase();
@@ -3199,7 +3360,10 @@ function wire(){
     }catch(e){ toast('入れられませんでした：'+e.message, true); }
     this.disabled = false; this.textContent = '初期値を入れ直す';
   };
-  $('btn-income-new').onclick = addIncome;
+  $('btn-income-new').onclick = openIncomeForm;
+  $('btn-income-save').onclick = addIncome;
+  $('btn-income-cancel').onclick = closeIncomeForm;
+  $('i-later').onchange = onIncomeLaterPicked;
   $('btn-income-csv').onclick = function(){
     csv([SHEETS['入金']].concat(DB['入金'].map(function(r){ return SHEETS['入金'].map(function(h){ return r[h]; }); })), '入金予定.csv');
   };
@@ -3236,7 +3400,7 @@ function wire(){
   };
 
   document.addEventListener('click', function(e){
-    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc],[data-deladmin],[data-payreq],[data-delperson],[data-fixdup]');
+    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc],[data-deladmin],[data-payreq],[data-delperson],[data-fixdup],[data-incev]');
     if(!t) return;
     var d = t.dataset;
     if(d.go){ setTab(d.go); window.scrollTo({top:0,behavior:'smooth'}); }
@@ -3251,6 +3415,7 @@ function wire(){
     else if(d.ms) toggleMaster(Number(d.ms));
     else if(d.delalloc) delAlloc(d.delalloc, d.alloctgt);
     else if(d.fixdup) fixDup(d.fixdup);
+    else if(d.incev) pickIncomeInvoice(Number(d.incev));
     else if(d.deladmin) removeAdmin(d.deladmin);
     else if(d.payreq) copyPayRequest(Number(d.payreq));
     else if(d.delperson) removePerson(Number(d.delperson));
