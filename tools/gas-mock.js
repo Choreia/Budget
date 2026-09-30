@@ -59,7 +59,7 @@ const ctx = {
   HtmlService: { createHtmlOutput: s => ({ content: s }) }
 };
 vm.createContext(ctx);
-let src = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
+let src = fs.readFileSync(process.env.CODE_GS || path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
 src = src.replace(/var SPREADSHEET_ID = '[^']*';/, "var SPREADSHEET_ID = 'DEMO_SS';");
 vm.runInContext(src, ctx, { filename: 'Code.gs' });
 

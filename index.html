@@ -960,7 +960,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-30 v45';
+var BUILD = '2026-09-30 v46';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -2006,10 +2006,26 @@ async function submitEntry(asDraft){
       await logAudit('直して出し直し', id, before, e['状態']);
       toast(id + ' ' + tx('をチェックに出しました'));
       clearForm();
-      await loadAll(); renderAll();
+      await refreshAfterSave();
       return;
     }
-    var saved = await appendRow('購入', e);
+    var saved;
+    try{ saved = await appendRow('購入', e); }
+    catch(appendErr){
+      // 書き込み役の返事が途中で切れても、シートには入っていることがある（名波さん 2026-09-30）。
+      // 同じ番号の行が自分の名前で入っていれば、保存できたとみなす。出し直して二重にしないため。
+      var landed = null;
+      try{
+        var now = await readSheet('購入');
+        // 番号で探す。書き込み役が番号を取り直していることもあるので、記入者・記入日時・品名・金額でも探す
+        landed = now.filter(function(r){
+          if(String(r['記入者メール']||'').toLowerCase()!==me.email.toLowerCase()) return false;
+          return r.id===id || (String(r['記入日時'])===String(e['記入日時']) && r['品名']===e['品名'] && num(r['税込'])===num(e['税込']));
+        })[0];
+      }catch(e3){}
+      if(!landed) throw appendErr;
+      saved = {id: landed.id};
+    }
     // 万一ぶつかって書き込み役が番号を取り直したら、こちらもその番号に合わせる
     if(saved && saved.id && saved.id !== id){
       id = saved.id; e.id = id;
@@ -2023,7 +2039,7 @@ async function submitEntry(asDraft){
     await logAudit(asDraft?'下書き保存':'記入', id, '', name+' '+yen(gross));
     toast(asDraft ? tx('下書きで保存しました') : id + ' ' + tx('をチェックに出しました'));
     clearForm();
-    await loadAll(); renderAll();
+    await refreshAfterSave();
   }catch(ex){
     var expired = /^401 |ログインの有効期限|ログインを確認できません/.test(ex.message);
     $('form-err').innerHTML = '<div class="err">'+tx('保存できませんでした。')+'<br>'+
@@ -2037,6 +2053,15 @@ async function submitEntry(asDraft){
     };
   }finally{
     btn.disabled=false; btn.textContent = asDraft ? tx('下書きで保存') : tx('チェックに出す');
+  }
+}
+async function refreshAfterSave(){
+  try{ await loadAll(); renderAll(); }
+  catch(e){
+    $('form-err').innerHTML = '<div class="err" style="background:var(--warn-soft);border-color:var(--warn);color:var(--ink)">'+
+      esc(T('保存はできています。画面の更新だけがうまくいきませんでした。出し直さずに、ページを読み込み直してください。',
+            'Your entry was saved. Only the screen refresh failed. Please reload the page instead of submitting again.'))+
+      '<br><span class="mono" style="font-size:.8em">'+esc(e.message||String(e))+'</span></div>';
   }
 }
 function clearForm(){
