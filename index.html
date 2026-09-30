@@ -960,7 +960,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-30 v46';
+var BUILD = '2026-09-30 v47';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -2089,6 +2089,12 @@ function statusPill(e){
   }
   return '<span class="pill p-mute">'+esc(s||'')+'</span>';
 }
+/* 出したものの一覧は、進んでいるものと、終わって30日以内のものだけを出す。
+   ずっと増え続けないように（名波さん 2026-09-30）。古いものはボタンで開く。 */
+var showAllMine = false;
+var MY_RECENT_DAYS = 30;
+function isDone(e){ return e['状態']===ST.PAID || e['状態']===ST.WD; }
+function doneDate(e){ return ymd(e['支払日'] || e['更新日時'] || e['記入日時']); }
 function renderMy(){
   var mine = DB['購入'].filter(function(e){ return (e['記入者メール']||'').toLowerCase()===me.email.toLowerCase(); })
     .sort(function(a,b){ return String(b['記入日時']).localeCompare(String(a['記入日時'])); });
@@ -2100,7 +2106,12 @@ function renderMy(){
     probs.slice(0,3).map(function(e){ return '<b>'+esc(e.id)+'</b>'; }).join(isEn()?', ':'、')+
     ' '+tx('を直してください。')+'</span><button class="btn ghost sm" data-go="gaps">'+tx('見る')+'</button></div>' : '';
   if(!mine.length){ $('my-list').innerHTML = '<div class="empty">'+tx('まだ何も出していません。下の欄から記入してください。')+'</div>'; return; }
-  var rows = mine.map(function(e){
+  // 終わったもの（支払済・取り下げ）で30日より前のものは隠す。証憑が足りないものは終わっていても出す
+  var hidden = mine.filter(function(e){
+    return isDone(e) && !(e['状態']!==ST.WD && evMissing(e).length) && daysAgo(doneDate(e)) > MY_RECENT_DAYS;
+  });
+  var shown = showAllMine ? mine : mine.filter(function(e){ return hidden.indexOf(e) < 0; });
+  var rows = shown.map(function(e){
     var miss = evMissing(e);
     var sub = [];
     if(e['状態']===ST.REJ && e['差戻理由']) sub.push(tx('差し戻し：')+esc(e['差戻理由']));
@@ -2119,8 +2130,17 @@ function renderMy(){
   $('my-list').innerHTML =
     '<div class="tablewrap" style="border:none;border-radius:0;box-shadow:none"><table>'+
     '<thead><tr><th>No</th><th>'+tx('記入日')+'</th><th>'+tx('品名')+'</th><th>'+tx('税込')+'</th><th>'+tx('いまどこ')+'</th><th></th></tr></thead>'+
-    '<tbody>'+rows+'</tbody></table></div>'+
-    '<p class="lockline" style="padding:0 18px 14px">'+tx('出したあとは直せません。チェックの前なら取り下げ、差し戻されたら直して出し直しです。')+'</p>';
+    '<tbody>'+(rows || '<tr><td colspan="6" class="empty">'+esc(T('いま進んでいるものはありません。','Nothing in progress.'))+'</td></tr>')+'</tbody></table></div>'+
+    (hidden.length
+      ? '<div style="padding:4px 18px 0"><button class="btn ghost sm" id="btn-my-all">'+
+        esc(showAllMine ? T('終わったものをしまう','Hide finished')
+                        : T('終わったものも見る（'+hidden.length+'件）','Show finished ('+hidden.length+')'))+'</button></div>'
+      : '')+
+    '<p class="lockline" style="padding:0 18px 14px">'+esc(T('支払済・取り下げのものは、30日たつと一覧からしまわれます（記録はずっと残ります）。',
+      'Paid and withdrawn entries are tucked away after 30 days (the records are kept).'))+'　'+
+      tx('出したあとは直せません。チェックの前なら取り下げ、差し戻されたら直して出し直しです。')+'</p>';
+  var ab = $('btn-my-all');
+  if(ab) ab.onclick = function(){ showAllMine = !showAllMine; renderMy(); };
 }
 
 /* ==================== チェックする ==================== */
