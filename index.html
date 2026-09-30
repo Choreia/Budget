@@ -363,7 +363,7 @@
     <nav class="tabs" role="tablist" id="tabs">
       <button role="tab" aria-selected="true"  data-t="apply"   data-roles="user mgr acc pres">わたしの記入</button>
       <button role="tab" aria-selected="false" data-t="approve" data-roles="mgr acc pres">チェックする<span class="pipcount" id="cnt-approve">0</span></button>
-      <button role="tab" aria-selected="false" data-t="income"  data-roles="mgr acc">入金予定</button>
+      <button role="tab" aria-selected="false" data-t="income"  data-roles="user mgr acc pres">入金予定</button>
       <button role="tab" aria-selected="false" data-t="ledger"  data-roles="mgr acc pres">台帳</button>
       <button role="tab" aria-selected="false" data-t="cost"    data-roles="mgr acc pres">課のコスト</button>
       <button role="tab" aria-selected="false" data-t="gaps"    data-roles="user mgr acc pres">抜けているもの<span class="pipcount" id="cnt-gaps">0</span></button>
@@ -960,7 +960,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-29 v44';
+var BUILD = '2026-09-30 v45';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -970,7 +970,7 @@ var SHEETS = {
            '見積書','発注書','納品書','請求書','領収書','振込証憑','その他',
            '目的','勘定科目',
            'チェック者','チェック日時','社長承認者','社長承認日時','差戻理由','更新日時','更新者'],
-  '入金': ['id','記入日時','記入者','部門','種別','項目','証憑','税込','税抜','振込期日','入金確認日','確認者','売掛入力','備考'],
+  '入金': ['id','記入日時','記入者','部門','種別','項目','証憑','税込','税抜','振込期日','入金確認日','確認者','売掛入力','備考','記入者メール'],
   'マスタ': ['リスト','値','有効','並び','使用回数','最終使用'],
   '人': ['メール','名前','ロール','部門','上長メール'],
   '按分': ['id','キーワード','分け方','部門','重み','有効','更新者','更新日時','対象'],
@@ -2227,13 +2227,17 @@ function evNames(a){ return a.map(evName).join(isEn()?', ':'・'); }
    シートの「証憑」列にはファイルへのリンクを入れる（複数なら改行区切り）。 */
 function incomeFolder(){ return (orgConfig && orgConfig.incomeFolderId) || ''; }
 function evLinks(v){ return String(v||'').split(/\s+/).filter(function(x){ return /^https?:/.test(x); }); }
-function canEditIncome(){ return me.role==='acc' || me.role==='mgr' || me.role==='pres'; }
+/* 請求書を足せるか。承認者・経理・社長はすべて、一般ユーザは自分が足したものだけ。 */
+function canEditIncome(r){
+  if(me.role==='acc' || me.role==='mgr' || me.role==='pres') return true;
+  return !!r && String(r['記入者メール']||'').toLowerCase() === me.email.toLowerCase();
+}
 function incomeEvCell(r){
   var ls = evLinks(r['証憑']);
   var h = ls.map(function(u, i){
     return '<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(T('開く','Open'))+(ls.length>1?(i+1):'')+'</a>';
   }).join(' ');
-  if(canEditIncome())
+  if(canEditIncome(r))
     h += (h?' ':'')+'<button class="btn ghost sm" data-incev="'+r._row+'">'+
          esc(ls.length ? T('足す','Add') : T('上げる','Upload'))+'</button>';
   return h || '—';
@@ -2255,9 +2259,12 @@ async function uploadIncomeFiles(files, id, due, title){
 }
 function openIncomeForm(){
   var box = $('income-form');
-  var depts = myDepts().length ? myDepts() : mvals('部門').map(function(m){ return m['値']; });
-  $('i-dept').innerHTML = depts.map(function(v){ return '<option>'+esc(v)+'</option>'; }).join('') +
-    '<option>'+esc(T('その他','Other'))+'</option>';
+  // 入金予定の部門は、マスタの「入金部門」（無ければ部門）から選ぶ
+  var depts = mvals('入金部門').map(function(m){ return m['値']; });
+  if(!depts.length) depts = myDepts().length ? myDepts() : mvals('部門').map(function(m){ return m['値']; });
+  var other = T('その他','Other');
+  if(depts.indexOf(other) < 0) depts = depts.concat([other]);
+  $('i-dept').innerHTML = depts.map(function(v){ return '<option>'+esc(v)+'</option>'; }).join('');
   $('i-err').innerHTML = '';
   $('i-files-hint').textContent = incomeFolder()
     ? T('経理の請求書フォルダに入ります。あとからでも上げられます。','Goes into the accounting invoice folder. You can also add it later.')
@@ -2764,7 +2771,7 @@ function renderGaps(){
           '<td><span class="pill p-bad">'+esc(x.what)+'</span><div class="hint" style="margin-top:4px">'+esc(x.why)+'</div></td>'+
           '<td>'+esc(x.who)+'</td><td class="mono">'+days(x.days)+'</td>'+
           '<td>'+(x.sheet==='購入' && x.kind==='証憑' ? '<button class="btn ghost sm" data-ev="'+x.row+'">証憑を上げる</button>'
-                 : x.sheet==='入金' && x.kind==='証憑' && canEditIncome() ? '<button class="btn ghost sm" data-incev="'+x.row+'">請求書を上げる</button>' : '')+'</td></tr>';
+                 : x.sheet==='入金' && x.kind==='証憑' && canEditIncome(DB['入金'].filter(function(r){ return r._row===x.row; })[0]) ? '<button class="btn ghost sm" data-incev="'+x.row+'">請求書を上げる</button>' : '')+'</td></tr>';
       }).join('')+'</tbody></table></div>';
   }
   var pe = (orgConfig && orgConfig.projectEvidence) || {};

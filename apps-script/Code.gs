@@ -36,7 +36,7 @@ var SHEETS = {
            '見積書','発注書','納品書','請求書','領収書','振込証憑','その他',
            '目的','勘定科目',
            'チェック者','チェック日時','社長承認者','社長承認日時','差戻理由','更新日時','更新者'],
-  '入金': ['id','記入日時','記入者','部門','種別','項目','証憑','税込','税抜','振込期日','入金確認日','確認者','売掛入力','備考'],
+  '入金': ['id','記入日時','記入者','部門','種別','項目','証憑','税込','税抜','振込期日','入金確認日','確認者','売掛入力','備考','記入者メール'],
   'マスタ': ['リスト','値','有効','並び','使用回数','最終使用'],
   '人': ['メール','名前','ロール','部門','上長メール'],
   '按分': ['id','キーワード','分け方','部門','重み','有効','更新者','更新日時','対象'],
@@ -262,8 +262,9 @@ function doRead(me, names) {
     if (!SHEETS[name]) return;
     if (name === '履歴' && me.role !== 'acc') return;
     var v = readValues(name);
-    // 一般ユーザに他人の購入・入金は渡さない。画面で隠すのではなく、そもそも送らない。
-    if (me.role === 'user' && (name === '購入' || name === '入金')) {
+    // 一般ユーザに他人の購入は渡さない。画面で隠すのではなく、そもそも送らない。
+    // 入金予定は全員に見せる（名波さん 2026-09-30「危機意識を持たせるため、みんなの分が見えてよい」）。
+    if (me.role === 'user' && name === '購入') {
       v = filterOwn(v, name, me);
     } else if (me.role === 'mgr' && name === '購入') {
       v = filterDept(v, me);
@@ -319,6 +320,7 @@ function doAppend(me, name, row, prefix) {
         row['id'] = reserveId(prefix || String(row['id'] || '').replace(/\d+$/, ''), '購入');
       }
     }
+    if (name === '入金') row['記入者メール'] = me.email;
     if (name === '入金' && (!row['id'] || idExists(row['id'], '入金'))) {
       row['id'] = reserveId(prefix || String(row['id'] || '').replace(/\d+$/, ''), '入金');
     }
@@ -398,7 +400,12 @@ function canWrite(me, name, row, old) {
   }
   if (name === '入金') {
     if (me.role === 'mgr' || me.role === 'pres') return null;
-    return '入金を書けるのは承認者と経理です。';
+    if (!old) return null;                      // 入金予定を足すのは誰でもできる
+    // 一般ユーザが直せるのは自分が足したものだけ。入金の確認は経理がする
+    var own = String(old['記入者メール'] || '').toLowerCase() === me.email;
+    if (!own) return '人が足した入金予定は直せません。';
+    if (String(row['入金確認日'] || '') !== String(old['入金確認日'] || '')) return '入金の確認は経理がします。';
+    return null;
   }
   return null;
 }
