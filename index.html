@@ -960,7 +960,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-09-30 v47';
+var BUILD = '2026-10-02 v48';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -1356,8 +1356,13 @@ async function saveRow(name, obj){
   await api(SS+ssId+'/values/'+A1(name,'A'+obj._row)+'?valueInputOption=RAW',
     {method:'PUT', body: JSON.stringify({values:[toArr(name,obj)]})});
 }
-async function logAudit(action, target, before, after){
-  try{ await appendRow('履歴', {'日時':nowStr(),'操作者':me.name,'操作':action,'対象':target,'変更前':before||'','変更後':after||''}); }catch(e){}
+/* 履歴に残す。書き込み役は自分でも操作を記録し、経理以外からの履歴の追記は断る。
+   なので経理のときだけ、画面を待たせずに後ろで書く。 */
+function logAudit(action, target, before, after){
+  if(me.role !== 'acc') return Promise.resolve();
+  var row = {'日時':nowStr(),'操作者':me.name,'操作':action,'対象':target,'変更前':before||'','変更後':after||''};
+  background(function(){ return appendRow('履歴', row); });
+  return Promise.resolve();
 }
 
 /* ==================== 初期化 ==================== */
@@ -1782,7 +1787,7 @@ async function createFolder(name){
     f = await api(url, {method:'POST', body: JSON.stringify(body)});
     toast('証憑フォルダが使えないので、あなたのドライブに作りました。経理に共有を依頼してください。', true);
   }
-  await shareInDomain(f.id);
+  shareInDomain(f.id);           // 待たない（失敗しても記入は続ける）
   return f;
 }
 /* 社内の人が開けるようにする。組織の設定で弾かれても記入は続けられる。 */
@@ -1960,19 +1965,23 @@ async function submitEntry(asDraft){
     if(!gross) gross = Math.floor(net*(1+TAX));
     if(!net) net = Math.round(gross/(1+TAX));
     var ed = editing;
+    progress(btn, T('番号を取っています…','Getting a number…'));
     var id = ed ? ed.id : await reserveId();
     var folder = null;
     if(ed && ed['証憑フォルダ'] && idFromUrl(ed['証憑フォルダ'])){
       folder = {id: idFromUrl(ed['証憑フォルダ']), webViewLink: ed['証憑フォルダ']};
     } else if(pendingFiles.length || !asDraft){
+      progress(btn, T('証憑フォルダを作っています…','Creating the evidence folder…'));
       folder = await createFolder(id + '_' + name);
     }
     var flags = {};
     if(ed) ['見積書','発注書','納品書','請求書','領収書','振込証憑','その他'].forEach(function(k){ if(ed[k]) flags[k] = ed[k]; });
-    for(var i=0;i<pendingFiles.length;i++){
-      await uploadTo(folder.id, pendingFiles[i].file);
-      flags[pendingFiles[i].type] = 'TRUE';
+    if(pendingFiles.length){
+      progress(btn, T('証憑を上げています（'+pendingFiles.length+'件）…','Uploading '+pendingFiles.length+' file(s)…'));
+      await Promise.all(pendingFiles.map(function(pf){ return uploadTo(folder.id, pf.file); }));
+      pendingFiles.forEach(function(pf){ flags[pf.type] = 'TRUE'; });
     }
+    progress(btn, T('記録しています…','Saving…'));
     var pay = $('f-pay').value;
     var e = {
       id:id, '記入日時':nowStr(), '記入者メール':me.email, '記入者':me.name,
@@ -2003,10 +2012,10 @@ async function submitEntry(asDraft){
       var before = ed['状態'];
       e = Object.assign({}, ed, e, {'記入日時': ed['記入日時'], '差戻理由':'', 'チェック者':'', 'チェック日時':''});
       await saveRow('購入', e);
-      await logAudit('直して出し直し', id, before, e['状態']);
+      logAudit('直して出し直し', id, before, e['状態']);
       toast(id + ' ' + tx('をチェックに出しました'));
       clearForm();
-      await refreshAfterSave();
+      showSavedNow(e);
       return;
     }
     var saved;
@@ -2031,15 +2040,16 @@ async function submitEntry(asDraft){
       id = saved.id; e.id = id;
       if(folder) await renameFolder(folder.id, id + '_' + name);
     }
-    // 使用回数の更新はおまけ。ここで失敗しても記入は成功している。
-    try{
-      await bumpMaster('部門', form.dept);
-      if(form.item) await bumpMaster('項目', form.item);
-    }catch(e2){}
-    await logAudit(asDraft?'下書き保存':'記入', id, '', name+' '+yen(gross));
+    // 使用回数はおまけ。マスタを書けるのは経理だけなので、経理のときだけ後ろで数える
+    if(me.role === 'acc'){
+      var dept = form.dept, item = form.item;
+      background(function(){ return bumpMaster('部門', dept); });
+      if(item) background(function(){ return bumpMaster('項目', item); });
+    }
+    logAudit(asDraft?'下書き保存':'記入', id, '', name+' '+yen(gross));
     toast(asDraft ? tx('下書きで保存しました') : id + ' ' + tx('をチェックに出しました'));
     clearForm();
-    await refreshAfterSave();
+    showSavedNow(e);
   }catch(ex){
     var expired = /^401 |ログインの有効期限|ログインを確認できません/.test(ex.message);
     $('form-err').innerHTML = '<div class="err">'+tx('保存できませんでした。')+'<br>'+
@@ -2055,6 +2065,12 @@ async function submitEntry(asDraft){
     btn.disabled=false; btn.textContent = asDraft ? tx('下書きで保存') : tx('チェックに出す');
   }
 }
+var bgChain = Promise.resolve();
+function background(fn){
+  bgChain = bgChain.then(function(){ return fn(); }).catch(function(){});
+  return bgChain;
+}
+function progress(btn, text){ if(btn) btn.textContent = text; }
 async function refreshAfterSave(){
   try{ await loadAll(); renderAll(); }
   catch(e){
@@ -2063,6 +2079,12 @@ async function refreshAfterSave(){
             'Your entry was saved. Only the screen refresh failed. Please reload the page instead of submitting again.'))+
       '<br><span class="mono" style="font-size:.8em">'+esc(e.message||String(e))+'</span></div>';
   }
+}
+function showSavedNow(e){
+  var have = DB['購入'].filter(function(x){ return x.id===e.id; })[0];
+  if(have) Object.assign(have, e); else DB['購入'].push(Object.assign({}, e));
+  try{ renderAll(); }catch(err){}
+  background(refreshAfterSave);
 }
 function clearForm(){
   ['f-name','f-why','f-net','f-gross','f-vendor','f-accepted','f-order','f-plan','f-deliver','f-invoice','f-hsn']

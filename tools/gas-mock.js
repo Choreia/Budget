@@ -68,7 +68,8 @@ http.createServer((req, res) => {
   let body = '';
   req.on('data', c => body += c);
   req.on('end', () => {
-    const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' }); res.end(typeof obj === 'string' ? obj : JSON.stringify(obj)); };
+    const delay = req.url.startsWith('/__') ? 0 : Number(process.env.DELAY_MS || 0);   // 本物の書き込み役の遅さをまねる
+    const send = (code, obj) => setTimeout(() => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' }); res.end(typeof obj === 'string' ? obj : JSON.stringify(obj)); }, delay);
     try {
       if(req.url.startsWith('/__reset')){ BOOK = body ? JSON.parse(body) : {}; PROPS = {}; CACHE = {}; return send(200, { ok: true }); }
       if(req.url.startsWith('/__dump'))  return send(200, { book: BOOK, props: PROPS });
