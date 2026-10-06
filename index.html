@@ -960,7 +960,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-10-02 v48';
+var BUILD = '2026-10-06 v49';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -1746,23 +1746,45 @@ async function copyPayRequest(row){
     bg.onclick = function(ev){ if(ev.target===bg) bg.remove(); };
   }
 }
-function renderFiles(){
-  var box = $('filebox');
-  if(!box){
-    $('f-files').insertAdjacentHTML('afterend', '<div id="filebox" class="filelist"></div>');
-    box = $('filebox');
-  }
-  box.innerHTML = pendingFiles.map(function(f,i){
-    return '<span style="display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line2);border-radius:7px;padding:3px 8px;font-size:.78rem">'+
+/* 選んだ証憑の一覧。選ぶたびに足していく（以前は選び直すと前のファイルが消えていた。2026-10-06 名波さん）。
+   ファイルごとに種類を選べ、✕で外せる。記入欄と「証憑を上げる」画面の両方で使う。 */
+function addFiles(list, files, defType){
+  Array.prototype.forEach.call(files || [], function(f){
+    var dup = list.some(function(x){ return x.file.name===f.name && x.file.size===f.size && x.file.lastModified===f.lastModified; });
+    // ファイル名から種類が分かればそれ、分からなければ「足りないもの」（無ければ請求書）
+    var named = /見積|quote|estimate|発注|order|po|納品|delivery|領収|receipt|請求|invoice|bill/i.test(f.name);
+    if(!dup) list.push({file:f, type: named ? guessType(f.name) : (defType || guessType(f.name))});
+  });
+}
+function fileChips(list){
+  if(!list.length) return '';
+  return list.map(function(f,i){
+    return '<span style="display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line2);border-radius:7px;padding:3px 4px 3px 8px;font-size:.78rem;margin:0 6px 6px 0">'+
       esc(f.file.name)+
       '<select data-fi="'+i+'" style="width:auto;padding:2px 6px;font-size:.75rem">'+
       EV_TYPES.map(function(t){ return '<option value="'+esc(t)+'"'+(f.type===t?' selected':'')+'>'+esc(tx(t))+'</option>'; }).join('')+
-      '</select></span>';
-  }).join('');
+      '</select><button type="button" class="btn ghost sm" data-fx="'+i+'" style="padding:0 7px;min-height:0" aria-label="'+esc(T('外す','Remove'))+'">✕</button></span>';
+  }).join('') + '<div class="hint">'+esc(T(list.length+'件。さらに足すときは、もう一度ファイルを選んでください。',
+                                            list.length+' file(s). Choose files again to add more.'))+'</div>';
+}
+function wireFileChips(box, list, rerender){
   box.onchange = function(e){
     var s = e.target.closest('select'); if(!s) return;
-    pendingFiles[Number(s.dataset.fi)].type = s.value;
+    list[Number(s.dataset.fi)].type = s.value;
   };
+  box.onclick = function(e){
+    var b = e.target.closest('[data-fx]'); if(!b) return;
+    list.splice(Number(b.dataset.fx), 1); rerender();
+  };
+}
+function renderFiles(){
+  var box = $('filebox');
+  if(!box){
+    $('f-files').insertAdjacentHTML('afterend', '<div id="filebox" class="filelist" style="margin-top:8px"></div>');
+    box = $('filebox');
+  }
+  box.innerHTML = fileChips(pendingFiles);
+  wireFileChips(box, pendingFiles, renderFiles);
 }
 function guessType(name){
   var n = name.toLowerCase();
@@ -2141,9 +2163,11 @@ function renderMy(){
     if(e['種別'] && e['種別']!=='購入') sub.push(esc(e['種別']));
     var act = '';
     var wdBtn = ' <button class="btn ghost sm" data-wd="'+e._row+'">'+tx('取り下げる')+'</button>';
+    var fixBtn = '<button class="btn ghost sm" data-edit="'+e._row+'">'+esc(T('直す','Edit'))+'</button> ';
     if(e['状態']===ST.REJ) act = '<button class="btn sm" data-edit="'+e._row+'">'+tx('直して出す')+'</button>'+wdBtn;
-    else if(e['状態']===ST.WAIT) act = wdBtn;
-    else if(e['状態']===ST.DRAFT) act = '<button class="btn sm" data-send="'+e._row+'">'+tx('出す')+'</button>'+wdBtn;
+    else if(e['状態']===ST.WAIT) act = fixBtn + wdBtn;
+    else if(e['状態']===ST.DRAFT) act = fixBtn + '<button class="btn sm" data-send="'+e._row+'">'+tx('出す')+'</button>'+wdBtn;
+    else if(e['状態']===ST.WD) act = '<button class="btn ghost sm" data-copy="'+e._row+'">'+esc(T('写して出し直す','Copy and resubmit'))+'</button>';
     else if(miss.length) act = '<button class="btn sm" data-ev="'+e._row+'">'+tx('証憑を上げる')+'</button>';
     return '<tr><td class="mono">'+esc(e.id)+'</td><td class="mono">'+md(e['記入日時'])+'</td>'+
       '<td class="name">'+esc(e['品名'])+(sub.length?'<small>'+sub.join(' ／ ')+'</small>':'')+'</td>'+
@@ -2870,28 +2894,35 @@ function evModal(row){
   bg.innerHTML = '<div class="modal"><h3>'+tx('証憑を上げる')+' — '+esc(e.id)+'</h3><div class="body">'+
     '<dl class="kv"><dt>'+tx('品名')+'</dt><dd>'+esc(e['品名'])+'</dd><dt>'+tx('金額')+'</dt><dd>'+yen(e['税込'])+'</dd>'+
     '<dt>'+tx('足りないもの')+'</dt><dd>'+esc(need.map(tx).join(isEn()?', ':'・')||tx('なし'))+'</dd></dl>'+
-    '<div class="field"><label for="m-file">'+tx('ファイル')+'</label><input type="file" id="m-file" multiple></div>'+
-    '<div class="field"><label for="m-type">'+tx('種類')+'</label><select id="m-type">'+
-      EV_TYPES.map(function(t){ return '<option value="'+esc(t)+'"'+(need[0]===t?' selected':'')+'>'+esc(tx(t))+'</option>'; }).join('')+'</select></div>'+
+    '<div class="field"><label for="m-file">'+tx('ファイル')+'</label><input type="file" id="m-file" multiple>'+
+      '<div id="m-files" class="filelist" style="margin-top:8px"></div>'+
+      '<div class="hint">'+esc(T('いくつでも足せます。ファイルごとに種類を選んでください。','Add as many as you need, and choose the type for each.'))+'</div></div>'+
     '<div class="actions"><button class="btn" id="m-up">'+tx('上げる')+'</button>'+
     '<button class="btn ghost" id="m-cancel">'+tx('やめる')+'</button></div></div></div>';
   document.body.appendChild(bg);
+  var mFiles = [];
+  var mBox = bg.querySelector('#m-files');
+  var mRender = function(){ mBox.innerHTML = fileChips(mFiles); };
+  wireFileChips(mBox, mFiles, mRender);
+  bg.querySelector('#m-file').addEventListener('change', function(){
+    addFiles(mFiles, this.files, need[0]); this.value = ''; mRender();
+  });
   bg.querySelector('#m-cancel').onclick = function(){ bg.remove(); };
   bg.onclick = function(ev){ if(ev.target===bg) bg.remove(); };
   bg.querySelector('#m-up').onclick = async function(){
-    var files = bg.querySelector('#m-file').files;
-    if(!files.length){ toast(tx('ファイルを選んでください'), true); return; }
-    var type = bg.querySelector('#m-type').value;
+    if(!mFiles.length){ toast(tx('ファイルを選んでください'), true); return; }
     this.disabled = true; this.textContent=tx('上げています…');
     try{
       var folderId = null;
       if(e['証憑フォルダ']){ folderId = idFromUrl(e['証憑フォルダ']); }
       if(!folderId){ var f = await createFolder(e.id+'_'+e['品名']); folderId=f.id; e['証憑フォルダ']=f.webViewLink; }
-      for(var i=0;i<files.length;i++) await uploadTo(folderId, files[i]);
-      e[type]='TRUE'; e['更新日時']=nowStr(); e['更新者']=me.name;
+      await Promise.all(mFiles.map(function(f){ return uploadTo(folderId, f.file); }));
+      var types = [];
+      mFiles.forEach(function(f){ e[f.type]='TRUE'; if(types.indexOf(f.type)<0) types.push(f.type); });
+      e['更新日時']=nowStr(); e['更新者']=me.name;
       await saveRow('購入', e);
-      await logAudit('証憑追加', e.id, '', type);
-      toast(tx(type)+tx('を上げました'));
+      logAudit('証憑追加', e.id, '', types.join('・'));
+      toast(types.map(tx).join(isEn()?', ':'・')+tx('を上げました'));
       bg.remove();
       await loadAll(); renderAll();
     }catch(ex){ toast(tx('上げられませんでした：')+ex.message, true); this.disabled=false; this.textContent=tx('上げる'); }
@@ -3562,7 +3593,8 @@ function wire(){
     Array.prototype.forEach.call(this.children, function(c){ c.setAttribute('aria-pressed', c===b?'true':'false'); });
   };
   $('f-files').addEventListener('change', function(){
-    pendingFiles = Array.prototype.map.call(this.files, function(f){ return {file:f, type:guessType(f.name)}; });
+    addFiles(pendingFiles, this.files);
+    this.value = '';          // 同じファイルを選び直せるように、選んだら空にする（一覧は下に残る）
     renderFiles();
   });
   $('btn-submit').onclick = function(){ submitEntry(false); };
@@ -3624,7 +3656,7 @@ function wire(){
   };
 
   document.addEventListener('click', function(e){
-    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc],[data-deladmin],[data-payreq],[data-delperson],[data-fixdup],[data-incev],[data-mv]');
+    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc],[data-deladmin],[data-payreq],[data-delperson],[data-fixdup],[data-incev],[data-mv],[data-copy]');
     if(!t) return;
     var d = t.dataset;
     if(d.go){ setTab(d.go); window.scrollTo({top:0,behavior:'smooth'}); }
@@ -3633,6 +3665,7 @@ function wire(){
     else if(d.wd) withdraw(Number(d.wd));
     else if(d.send) sendDraft(Number(d.send));
     else if(d.edit) reopen(Number(d.edit));
+    else if(d.copy) reopen(Number(d.copy), true);
     else if(d.ev) evModal(Number(d.ev));
     else if(d.paid) confirmPaid(Number(d.paid));
     else if(d.pay) markPaid(Number(d.pay));
@@ -3673,13 +3706,16 @@ function showEditBanner(){
   if(!editing){ if(b) b.remove(); return; }
   if(!b){ $('form-err').insertAdjacentHTML('beforebegin', '<div id="edit-banner" class="alertbar" style="margin-bottom:14px"></div>'); b = $('edit-banner'); }
   b.innerHTML = '<span class="pill p-warn">'+esc(editing.id)+'</span><span>'+
-    esc(T('を直しています。出すと同じ番号のまま、もう一度チェックに回ります。','is being fixed. Submitting sends it for review again under the same number.'))+
+    esc(editing['状態']===ST.DRAFT
+      ? T('を直しています。同じ番号のまま、下書きで保存するか、チェックに出せます。','is being edited. Save it as a draft again or submit it, under the same number.')
+      : T('を直しています。出すと同じ番号のまま、もう一度チェックに回ります。','is being fixed. Submitting sends it for review again under the same number.'))+
     '</span><button type="button" class="btn ghost sm" id="btn-edit-cancel">'+esc(T('直すのをやめる','Stop editing'))+'</button>';
   $('btn-edit-cancel').onclick = function(){ clearForm(); };
 }
-function reopen(row){
+/* asCopy=true は取り下げたものから。取り下げの記録は残し、内容だけ写して新しい番号で出す。 */
+function reopen(row, asCopy){
   var e = DB['購入'].filter(function(x){ return x._row===row; })[0]; if(!e) return;
-  editing = e;
+  editing = asCopy ? null : e;
   $('f-name').value = e['品名']; $('f-why').value = e['購入理由'];
   $('f-net').value = num(e['税抜']).toLocaleString('ja-JP');
   $('f-gross').value = num(e['税込']).toLocaleString('ja-JP');
@@ -3695,7 +3731,9 @@ function reopen(row){
   updateRoute();
   showEditBanner();
   $('f-name').scrollIntoView({behavior:'smooth', block:'center'});
-  toast(T('内容を下の欄に写しました。直して出し直してください。','Copied into the form below. Fix it and submit again.'));
+  toast(asCopy
+    ? T('内容を下の欄に写しました。新しい番号で出します。証憑は付け直してください。','Copied into the form below. It will get a new number; please attach the evidence again.')
+    : T('内容を下の欄に写しました。直して出し直してください。','Copied into the form below. Fix it and submit again.'));
 }
 
 /* ==================== 起動 ==================== */

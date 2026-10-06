@@ -360,6 +360,17 @@ function doUpdate(me, name, row, rowIndex, matchId) {
   var old = {};
   head.forEach(function (h, i) { old[h] = before[i]; });
 
+  // 承認のあとに本人が証憑を足すとき：証憑の列だけを今の行に重ねる。ほかの列はシートの値のまま。
+  delete row.__evidenceOnly;
+  var ownRow = String(old['記入者メール'] || '').toLowerCase() === me.email;
+  if (name === '購入' && ownRow && OPEN_STATES.indexOf(String(old['状態'] || '')) < 0 &&
+      me.role !== 'acc' && me.role !== 'pres') {
+    var raw = sh.getRange(rowIndex, 1, 1, head.length).getValues()[0];
+    var merged = { _row: rowIndex, __evidenceOnly: true };
+    head.forEach(function (h, i) { merged[h] = (EVIDENCE_COLS.indexOf(h) >= 0 && (h in row)) ? row[h] : raw[i]; });
+    row = merged;
+  }
+
   var guard = canWrite(me, name, row, old);
   if (guard) return { error: guard };
 
@@ -377,6 +388,8 @@ function doUpdate(me, name, row, rowIndex, matchId) {
 }
 
 /* 誰が何を書けるか。画面ではなく、ここで決めます。 */
+var EVIDENCE_COLS = ['見積書', '発注書', '納品書', '請求書', '領収書', '振込証憑', 'その他', '証憑フォルダ', '更新日時', '更新者'];
+var OPEN_STATES = ['下書き', '差し戻し', 'チェック待ち'];
 function canWrite(me, name, row, old) {
   if (me.role === 'acc') return null;
 
@@ -394,6 +407,9 @@ function canWrite(me, name, row, old) {
       return '自分の記入は自分で承認できません。';
     }
     if (mine && (st === '下書き' || st === '差し戻し' || st === 'チェック待ち')) return null;
+    // 承認のあとでも、本人が証憑を足すのは認める（請求書があとから届くことが多い）。
+    // doUpdate が証憑の列だけを取り込んだ行にしてから渡す（__evidenceOnly）。ほかの列は変わらない。
+    if (mine && row.__evidenceOnly) return null;
     if (me.role === 'mgr' && inCharge(me, old, personDepts())) return null;
     if (me.role === 'pres') return null;
     return '出したあとは直せません。経理に直してもらってください。';
