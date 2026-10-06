@@ -960,7 +960,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-10-06 v49';
+var BUILD = '2026-10-06 v50';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -2159,7 +2159,7 @@ function renderMy(){
     var miss = evMissing(e);
     var sub = [];
     if(e['状態']===ST.REJ && e['差戻理由']) sub.push(tx('差し戻し：')+esc(e['差戻理由']));
-    if(miss.length && e['状態']!==ST.DRAFT) sub.push(isEn() ? ('Missing: '+esc(miss.map(tx).join(', '))) : (esc(miss.join('・'))+'がまだです'));
+    if(miss.length && e['状態']!==ST.DRAFT && e['状態']!==ST.WD) sub.push(isEn() ? ('Missing: '+esc(miss.map(tx).join(', '))) : (esc(miss.join('・'))+'がまだです'));
     if(e['種別'] && e['種別']!=='購入') sub.push(esc(e['種別']));
     var act = '';
     var wdBtn = ' <button class="btn ghost sm" data-wd="'+e._row+'">'+tx('取り下げる')+'</button>';
@@ -2184,7 +2184,8 @@ function renderMy(){
       : '')+
     '<p class="lockline" style="padding:0 18px 14px">'+esc(T('支払済・取り下げのものは、30日たつと一覧からしまわれます（記録はずっと残ります）。',
       'Paid and withdrawn entries are tucked away after 30 days (the records are kept).'))+'　'+
-      tx('出したあとは直せません。チェックの前なら取り下げ、差し戻されたら直して出し直しです。')+'</p>';
+      esc(T('下書き・チェック待ちは「直す」、差し戻されたら「直して出す」、取り下げたものは「写して出し直す」で直せます。',
+            'Use Edit for drafts and entries awaiting review, Fix and resubmit when returned, and Copy and resubmit for withdrawn ones.'))+'</p>';
   var ab = $('btn-my-all');
   if(ab) ab.onclick = function(){ showAllMine = !showAllMine; renderMy(); };
 }
