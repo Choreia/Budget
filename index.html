@@ -960,7 +960,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-10-07 v51';
+var BUILD = '2026-10-07 v52';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -2784,6 +2784,9 @@ function findGaps(){
     }
     if(e['状態']===ST.OK || e['状態']===ST.PAID){
       var jm = journalMissing(e).filter(function(x){ return x!=='請求書か領収書'; });
+      // 項目・支払方法は経理と承認者が入れるもの（記入欄にも「迷ったら選ばずに出せます。経理が入れます」）。
+      // 本人の画面には、本人が埋められるもの（インボイスNo）だけ出す（浅田さん 2026-10-07）。
+      if(fillRole(e) !== 'all') jm = jm.filter(function(x){ return x==='インボイスNo'; });
       if(jm.length) out.push({kind:'仕訳', id:e.id, title:e['品名'], sub:sub,
         what:jm.join('・')+'がない',
         why:'これが無いと経理が仕訳を起こせません', who:e['記入者'],
