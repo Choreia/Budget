@@ -58,10 +58,11 @@ class FakeDrive:
         self.people = people            # email -> 表示名
         self.n = 0
         self.names = {}                 # id -> name
+        self.parents = {}               # id -> 親フォルダid
 
     def new_id(self, p):
         self.n += 1
-        return f'{p}{self.n:04d}'
+        return f'{p}{self.n:024d}'   # 本物と同じく20文字以上（アプリはURLからこの長さのIDを拾う）
 
     def handle(self, route):
         req = route.request
@@ -81,8 +82,11 @@ class FakeDrive:
             return j({'id': 'cfg'})
         if '/upload/drive/v3/files' in url:                           # 証憑のアップロード
             fid = self.new_id('U')
-            m = re.search(rb'"name":"([^"]+)"', req.post_data_buffer or b'')
+            buf = req.post_data_buffer or b''
+            m = re.search(rb'"name":"([^"]+)"', buf)
             if m: self.names[fid] = m.group(1).decode('utf-8', 'ignore')
+            m = re.search(rb'"parents":\["([^"]+)"', buf)
+            if m: self.parents[fid] = m.group(1).decode()
             return j({'id': fid})
         if re.search(r'/drive/v3/files/[^/?]+/permissions', url):
             return j({})
@@ -96,6 +100,10 @@ class FakeDrive:
             return j({'id': m.group(1)})
         if '/drive/v3/files' in url and method == 'GET':
             q = urllib.request.unquote(url)
+            m = re.search(r"'([^']+)' in parents", q)
+            if m:
+                return j({'files': [{'id': k, 'name': self.names.get(k, k), 'webViewLink': 'https://drive.google.com/file/d/' + k}
+                                    for k, v in self.parents.items() if v == m.group(1)]})
             if 'choreia-budget-config.json' in q: return j({'files': [{'id': 'cfg', 'name': 'choreia-budget-config.json'}]})
             return j({'files': [{'id': 'DEMO_ROOT', 'name': 'Choreia 予算 証憑'}]})
         if '/drive/v3/files' in url and method == 'POST':             # フォルダを作る

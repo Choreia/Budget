@@ -7,7 +7,7 @@
 const fs = require('fs'), path = require('path'), http = require('http'), vm = require('vm'), crypto = require('crypto');
 
 let BOOK = {};           // シート名 → 2次元配列（文字列）
-let PROPS = {}, CACHE = {};
+let PROPS = {}, CACHE = {}, MAILS = [];
 
 function pad(a, n){ while(a.length < n) a.push(''); return a; }
 function sheetObj(name){
@@ -56,7 +56,8 @@ const ctx = {
                 .replace('HH', p(t.getUTCHours())).replace('mm', p(t.getUTCMinutes())).replace('ss', p(t.getUTCSeconds())); }
   },
   ContentService: { MimeType: { JSON: 'json' }, createTextOutput: s => ({ content: s, setMimeType(){ return this; } }) },
-  HtmlService: { createHtmlOutput: s => ({ content: s }) }
+  HtmlService: { createHtmlOutput: s => ({ content: s }) },
+  MailApp: { sendEmail: o => { MAILS.push(o); } }
 };
 vm.createContext(ctx);
 let src = fs.readFileSync(process.env.CODE_GS || path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
@@ -71,8 +72,8 @@ http.createServer((req, res) => {
     const delay = req.url.startsWith('/__') ? 0 : Number(process.env.DELAY_MS || 0);   // 本物の書き込み役の遅さをまねる
     const send = (code, obj) => setTimeout(() => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' }); res.end(typeof obj === 'string' ? obj : JSON.stringify(obj)); }, delay);
     try {
-      if(req.url.startsWith('/__reset')){ BOOK = body ? JSON.parse(body) : {}; PROPS = {}; CACHE = {}; return send(200, { ok: true }); }
-      if(req.url.startsWith('/__dump'))  return send(200, { book: BOOK, props: PROPS });
+      if(req.url.startsWith('/__reset')){ BOOK = body ? JSON.parse(body) : {}; PROPS = {}; CACHE = {}; MAILS = []; return send(200, { ok: true }); }
+      if(req.url.startsWith('/__dump'))  return send(200, { book: BOOK, props: PROPS, mails: MAILS });
       if(req.method === 'POST'){ const out = ctx.doPost({ postData: { contents: body } }); return send(200, out.content); }
       return send(200, ctx.doGet().content);
     } catch(e){ return send(500, { error: String(e && e.stack || e) }); }

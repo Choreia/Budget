@@ -960,7 +960,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-10-06 v50';
+var BUILD = '2026-10-07 v51';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -1352,7 +1352,7 @@ async function renameFolder(folderId, name){
 }
 async function saveRow(name, obj){
   if(!obj._row) return appendRow(name, obj);
-  if(viaGas()){ await gas({action:'update', sheet:name, row:obj, rowIndex:obj._row, matchId:obj._matchId||obj.id||''}); return; }
+  if(viaGas()) return await gas({action:'update', sheet:name, row:obj, rowIndex:obj._row, matchId:obj._matchId||obj.id||''});
   await api(SS+ssId+'/values/'+A1(name,'A'+obj._row)+'?valueInputOption=RAW',
     {method:'PUT', body: JSON.stringify({values:[toArr(name,obj)]})});
 }
@@ -1748,13 +1748,35 @@ async function copyPayRequest(row){
 }
 /* 選んだ証憑の一覧。選ぶたびに足していく（以前は選び直すと前のファイルが消えていた。2026-10-06 名波さん）。
    ファイルごとに種類を選べ、✕で外せる。記入欄と「証憑を上げる」画面の両方で使う。 */
-function addFiles(list, files, defType){
+/* 証憑フォルダにすでに入っているファイル。直すとき・証憑を上げるときに見せる（名波さん 2026-10-07）。 */
+async function listFolder(folderId){
+  if(!folderId) return [];
+  var q = encodeURIComponent("'"+folderId+"' in parents and trashed=false");
+  var r = await api('https://www.googleapis.com/drive/v3/files?q='+q+
+    '&fields=files(id,name,webViewLink)&orderBy=createdTime&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives');
+  return r.files || [];
+}
+function existingHtml(files, folderUrl){
+  if(!files) return '<div class="hint">'+esc(T('すでに入っている証憑を確かめています…','Checking files already attached…'))+'</div>';
+  return '<div style="background:var(--ok-soft);border-radius:8px;padding:8px 12px;margin:6px 0;font-size:.82rem">'+
+    '<b>'+esc(files.length ? T('すでに入っている証憑（'+files.length+'件）','Already attached ('+files.length+')')
+                           : T('まだ証憑は入っていません','No files attached yet'))+'</b>'+
+    (folderUrl ? '　<a href="'+esc(folderUrl)+'" target="_blank" rel="noopener">'+esc(T('フォルダを開く','Open folder'))+'</a>' : '')+
+    (files.length ? '<ul style="margin:4px 0 0;padding-left:1.2em">'+files.map(function(f){
+      return '<li><a href="'+esc(f.webViewLink||'#')+'" target="_blank" rel="noopener">'+esc(f.name)+'</a></li>'; }).join('')+'</ul>' : '')+
+    '<div class="hint" style="margin-top:4px">'+esc(T('同じ名前のファイルは、選んでも上げません。','Files with the same name are not uploaded again.'))+'</div></div>';
+}
+var editingExisting = null;   // 直している記入のフォルダにあるファイル名
+function addFiles(list, files, defType, existing){
+  var skipped = [];
   Array.prototype.forEach.call(files || [], function(f){
+    if(existing && existing.some(function(x){ return x.name===f.name; })){ skipped.push(f.name); return; }
     var dup = list.some(function(x){ return x.file.name===f.name && x.file.size===f.size && x.file.lastModified===f.lastModified; });
     // ファイル名から種類が分かればそれ、分からなければ「足りないもの」（無ければ請求書）
     var named = /見積|quote|estimate|発注|order|po|納品|delivery|領収|receipt|請求|invoice|bill/i.test(f.name);
     if(!dup) list.push({file:f, type: named ? guessType(f.name) : (defType || guessType(f.name))});
   });
+  if(skipped.length) toast(T('すでに入っているので上げません：','Already attached, skipped: ')+skipped.join('、'), true);
 }
 function fileChips(list){
   if(!list.length) return '';
@@ -2033,9 +2055,9 @@ async function submitEntry(asDraft){
       // 元の行を直す。フォームに無い列（チェック者など）も引き継ぎ、差し戻しの理由だけ消す（経緯は履歴に残る）
       var before = ed['状態'];
       e = Object.assign({}, ed, e, {'記入日時': ed['記入日時'], '差戻理由':'', 'チェック者':'', 'チェック日時':''});
-      await saveRow('購入', e);
+      var res = await saveRow('購入', e);
       logAudit('直して出し直し', id, before, e['状態']);
-      toast(id + ' ' + tx('をチェックに出しました'));
+      toast(asDraft ? tx('下書きで保存しました') : id + ' ' + tx('をチェックに出しました') + notifiedNote(res));
       clearForm();
       showSavedNow(e);
       return;
@@ -2069,7 +2091,7 @@ async function submitEntry(asDraft){
       if(item) background(function(){ return bumpMaster('項目', item); });
     }
     logAudit(asDraft?'下書き保存':'記入', id, '', name+' '+yen(gross));
-    toast(asDraft ? tx('下書きで保存しました') : id + ' ' + tx('をチェックに出しました'));
+    toast(asDraft ? tx('下書きで保存しました') : id + ' ' + tx('をチェックに出しました') + notifiedNote(saved));
     clearForm();
     showSavedNow(e);
   }catch(ex){
@@ -2093,6 +2115,16 @@ function background(fn){
   return bgChain;
 }
 function progress(btn, text){ if(btn) btn.textContent = text; }
+/* 書き込み役がメールで知らせた相手を、名前で伝える */
+function notifiedNote(res){
+  var to = (res && res.notified) || [];
+  if(!to.length) return '';
+  var names = to.map(function(em){
+    var u = (DB['人']||[]).filter(function(x){ return String(x['メール']||'').toLowerCase()===em; })[0];
+    return (u && u['名前']) || em.split('@')[0];
+  });
+  return T('（'+names.join('・')+' さんにメールで知らせました）', ' (notified '+names.join(', ')+' by email)');
+}
 async function refreshAfterSave(){
   try{ await loadAll(); renderAll(); }
   catch(e){
@@ -2113,7 +2145,7 @@ function clearForm(){
     .forEach(function(i){ if($(i)) $(i).value=''; });
   pendingFiles=[]; $('f-files').value=''; renderFiles(); form.item=''; form.purpose='';
   chips($('ch-item'),'項目','item'); updateRoute();
-  editing = null; showEditBanner();
+  editing = null; editingExisting = null; showEditBanner();
 }
 
 /* ==================== わたしの記入 ==================== */
@@ -2862,7 +2894,8 @@ function renderGaps(){
         return '<tr><td class="name"><span class="mono">'+esc(x.id)+'</span> '+esc(x.title)+'<small>'+esc(x.sub)+'</small></td>'+
           '<td><span class="pill p-bad">'+esc(x.what)+'</span><div class="hint" style="margin-top:4px">'+esc(x.why)+'</div></td>'+
           '<td>'+esc(x.who)+'</td><td class="mono">'+days(x.days)+'</td>'+
-          '<td>'+(x.sheet==='購入' && x.kind==='証憑' ? '<button class="btn ghost sm" data-ev="'+x.row+'">証憑を上げる</button>'
+          '<td>'+(x.sheet==='購入' && (x.kind==='仕訳' || x.kind==='日付') && canFill(x.row) ? '<button class="btn ghost sm" data-fill="'+x.row+'">'+esc(T('埋める','Fill in'))+'</button>'
+                 : x.sheet==='購入' && x.kind==='証憑' ? '<button class="btn ghost sm" data-ev="'+x.row+'">証憑を上げる</button>'
                  : x.sheet==='入金' && x.kind==='証憑' && canEditIncome(DB['入金'].filter(function(r){ return r._row===x.row; })[0]) ? '<button class="btn ghost sm" data-incev="'+x.row+'">請求書を上げる</button>' : '')+'</td></tr>';
       }).join('')+'</tbody></table></div>';
   }
@@ -2888,6 +2921,61 @@ function renderGaps(){
     (isEn()?'Required evidence per project can be set in the settings file.'
            :'事業ごとの必要証憑は、設定ファイルの projectEvidence で足せます。')+'</p>';
 }
+/* 承認のあとに足りない所を埋める（名波さん 2026-10-07：「項目がない」をこちらで直せない）。
+   項目・支払方法は経理と担当の承認者。インボイスNo・検収日は本人も（届いてから分かる事実なので）。 */
+function fillRole(e){
+  if(!e) return '';
+  if(me.role==='acc' || me.role==='pres') return 'all';
+  if(me.role==='mgr' && inMyCharge(e)) return 'all';
+  if(String(e['記入者メール']||'').toLowerCase()===me.email.toLowerCase()) return 'facts';
+  return '';
+}
+function canFill(row){ return !!fillRole(DB['購入'].filter(function(x){ return x._row===row; })[0]); }
+function fillModal(row){
+  var e = DB['購入'].filter(function(x){ return x._row===row; })[0]; if(!e) return;
+  var role = fillRole(e); if(!role) return;
+  var items = mvals('項目').map(function(m){ return m['値']; });
+  if(e['項目'] && items.indexOf(e['項目'])<0) items.unshift(e['項目']);
+  var pays = mvals('支払方法').map(function(m){ return m['値']; });
+  if(e['支払方法'] && pays.indexOf(e['支払方法'])<0) pays.unshift(e['支払方法']);
+  var opt = function(list, cur){ return '<option value="">'+esc(T('選んでください','Choose'))+'</option>'+
+    list.map(function(v){ return '<option'+(v===cur?' selected':'')+'>'+esc(v)+'</option>'; }).join(''); };
+  var bg = document.createElement('div'); bg.className='modalbg';
+  bg.innerHTML = '<div class="modal"><h3>'+esc(T('足りない所を埋める','Fill in what is missing'))+' — '+esc(e.id)+'</h3><div class="body">'+
+    '<dl class="kv"><dt>'+tx('品名')+'</dt><dd>'+esc(e['品名'])+'</dd><dt>'+tx('記入者')+'</dt><dd>'+esc(e['記入者']||'')+'</dd>'+
+    '<dt>'+tx('金額')+'</dt><dd>'+yen(e['税込'])+'</dd></dl>'+
+    (role==='all'
+      ? '<div class="field"><label for="fl-item">'+tx('項目')+'</label><select id="fl-item">'+opt(items, e['項目'])+'</select></div>'+
+        '<div class="field"><label for="fl-pay">'+tx('支払方法')+'</label><select id="fl-pay">'+opt(pays, e['支払方法'])+'</select></div>'
+      : '<p class="hint">'+esc(T('項目と支払方法は、経理か承認者が埋めます。','Account item and payment method are filled in by accounting or the approver.'))+'</p>')+
+    '<div class="field"><label for="fl-inv">'+tx('インボイスNo')+'</label><input type="text" id="fl-inv" value="'+esc(e['インボイスNo']||'')+'"></div>'+
+    '<div class="field"><label for="fl-acc">'+esc(T('検収日（納品された日）','Received date'))+'</label><input type="date" id="fl-acc" value="'+esc(ymd(e['検収日'])||'')+'"></div>'+
+    '<div class="actions"><button class="btn" id="fl-save">'+esc(T('保存する','Save'))+'</button>'+
+    '<button class="btn ghost" id="fl-cancel">'+tx('やめる')+'</button></div></div></div>';
+  document.body.appendChild(bg);
+  bg.querySelector('#fl-cancel').onclick = function(){ bg.remove(); };
+  bg.onclick = function(ev){ if(ev.target===bg) bg.remove(); };
+  bg.querySelector('#fl-save').onclick = async function(){
+    var before = [e['項目'], e['支払方法'], e['インボイスNo'], e['検収日']].join(' / ');
+    var next = Object.assign({}, e);
+    if(role==='all'){
+      next['項目'] = bg.querySelector('#fl-item').value;
+      next['支払方法'] = bg.querySelector('#fl-pay').value;
+      next['勘定科目'] = accountFor(next['項目'], next['目的'], next['部門']) || next['勘定科目'] || '';
+    }
+    next['インボイスNo'] = bg.querySelector('#fl-inv').value.trim();
+    next['検収日'] = bg.querySelector('#fl-acc').value;
+    next['更新日時'] = nowStr(); next['更新者'] = me.name;
+    this.disabled = true; this.textContent = T('保存しています…','Saving…');
+    try{
+      await saveRow('購入', next);
+      logAudit('足りない所を埋めた', e.id, before, [next['項目'], next['支払方法'], next['インボイスNo'], next['検収日']].join(' / '));
+      toast(e.id+' '+T('を保存しました','saved'));
+      bg.remove();
+      await loadAll(); renderAll();
+    }catch(ex){ toast(T('保存できませんでした：','Could not save: ')+ex.message, true); this.disabled=false; this.textContent=T('保存する','Save'); }
+  };
+}
 function evModal(row){
   var e = DB['購入'].filter(function(x){ return x._row===row; })[0]; if(!e) return;
   var need = evMissing(e);
@@ -2897,16 +2985,23 @@ function evModal(row){
     '<dt>'+tx('足りないもの')+'</dt><dd>'+esc(need.map(tx).join(isEn()?', ':'・')||tx('なし'))+'</dd></dl>'+
     '<div class="field"><label for="m-file">'+tx('ファイル')+'</label><input type="file" id="m-file" multiple>'+
       '<div id="m-files" class="filelist" style="margin-top:8px"></div>'+
+      '<div id="m-existing"></div>'+
       '<div class="hint">'+esc(T('いくつでも足せます。ファイルごとに種類を選んでください。','Add as many as you need, and choose the type for each.'))+'</div></div>'+
     '<div class="actions"><button class="btn" id="m-up">'+tx('上げる')+'</button>'+
     '<button class="btn ghost" id="m-cancel">'+tx('やめる')+'</button></div></div></div>';
   document.body.appendChild(bg);
-  var mFiles = [];
+  var mFiles = [], mExisting = null;
+  var mEx = bg.querySelector('#m-existing');
+  if(e['証憑フォルダ']){
+    mEx.innerHTML = existingHtml(null);
+    listFolder(idFromUrl(e['証憑フォルダ'])).then(function(fs){ mExisting = fs; mEx.innerHTML = existingHtml(fs, e['証憑フォルダ']); },
+                                                  function(){ mEx.innerHTML = ''; });
+  }
   var mBox = bg.querySelector('#m-files');
   var mRender = function(){ mBox.innerHTML = fileChips(mFiles); };
   wireFileChips(mBox, mFiles, mRender);
   bg.querySelector('#m-file').addEventListener('change', function(){
-    addFiles(mFiles, this.files, need[0]); this.value = ''; mRender();
+    addFiles(mFiles, this.files, need[0], mExisting); this.value = ''; mRender();
   });
   bg.querySelector('#m-cancel').onclick = function(){ bg.remove(); };
   bg.onclick = function(ev){ if(ev.target===bg) bg.remove(); };
@@ -3594,7 +3689,7 @@ function wire(){
     Array.prototype.forEach.call(this.children, function(c){ c.setAttribute('aria-pressed', c===b?'true':'false'); });
   };
   $('f-files').addEventListener('change', function(){
-    addFiles(pendingFiles, this.files);
+    addFiles(pendingFiles, this.files, null, editing ? editingExisting : null);
     this.value = '';          // 同じファイルを選び直せるように、選んだら空にする（一覧は下に残る）
     renderFiles();
   });
@@ -3657,7 +3752,7 @@ function wire(){
   };
 
   document.addEventListener('click', function(e){
-    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc],[data-deladmin],[data-payreq],[data-delperson],[data-fixdup],[data-incev],[data-mv],[data-copy]');
+    var t = e.target.closest('[data-go],[data-ok],[data-rej],[data-wd],[data-send],[data-edit],[data-ev],[data-paid],[data-pay],[data-ms],[data-delalloc],[data-deladmin],[data-payreq],[data-delperson],[data-fixdup],[data-incev],[data-mv],[data-copy],[data-fill]');
     if(!t) return;
     var d = t.dataset;
     if(d.go){ setTab(d.go); window.scrollTo({top:0,behavior:'smooth'}); }
@@ -3667,6 +3762,7 @@ function wire(){
     else if(d.send) sendDraft(Number(d.send));
     else if(d.edit) reopen(Number(d.edit));
     else if(d.copy) reopen(Number(d.copy), true);
+    else if(d.fill) fillModal(Number(d.fill));
     else if(d.ev) evModal(Number(d.ev));
     else if(d.paid) confirmPaid(Number(d.paid));
     else if(d.pay) markPaid(Number(d.pay));
@@ -3696,14 +3792,21 @@ async function withdraw(row){
 async function sendDraft(row){
   var e = DB['購入'].filter(function(x){ return x._row===row; })[0]; if(!e) return;
   e['状態']=ST.WAIT; e['更新日時']=nowStr(); e['更新者']=me.name;
-  await saveRow('購入', e); await logAudit('提出', e.id, ST.DRAFT, ST.WAIT);
-  toast(e.id+' をチェックに出しました'); await loadAll(); renderAll();
+  var res = await saveRow('購入', e); await logAudit('提出', e.id, ST.DRAFT, ST.WAIT);
+  toast(e.id+' '+tx('をチェックに出しました')+notifiedNote(res)); await loadAll(); renderAll();
 }
 /* 差し戻されたものを直すとき、元の記入をそのまま直す（番号・証憑フォルダ・記入日時はそのまま）。
    以前は別の番号で新しく作っていたので、差し戻しの元が残り続け、証憑フォルダも分かれていた。 */
 var editing = null;
+function renderExisting(){
+  var box = $('existing-ev');
+  if(!editing || !editing['証憑フォルダ']){ if(box) box.remove(); return; }
+  if(!box){ $('f-files').insertAdjacentHTML('beforebegin', '<div id="existing-ev"></div>'); box = $('existing-ev'); }
+  box.innerHTML = existingHtml(editingExisting, editing['証憑フォルダ']);
+}
 function showEditBanner(){
   var b = $('edit-banner');
+  renderExisting();
   if(!editing){ if(b) b.remove(); return; }
   if(!b){ $('form-err').insertAdjacentHTML('beforebegin', '<div id="edit-banner" class="alertbar" style="margin-bottom:14px"></div>'); b = $('edit-banner'); }
   b.innerHTML = '<span class="pill p-warn">'+esc(editing.id)+'</span><span>'+
@@ -3717,6 +3820,11 @@ function showEditBanner(){
 function reopen(row, asCopy){
   var e = DB['購入'].filter(function(x){ return x._row===row; })[0]; if(!e) return;
   editing = asCopy ? null : e;
+  editingExisting = null;
+  if(editing && e['証憑フォルダ']){
+    listFolder(idFromUrl(e['証憑フォルダ'])).then(function(fs){ if(editing===e){ editingExisting = fs; renderExisting(); } },
+                                                  function(){ if(editing===e){ editingExisting = []; renderExisting(); } });
+  }
   $('f-name').value = e['品名']; $('f-why').value = e['購入理由'];
   $('f-net').value = num(e['税抜']).toLocaleString('ja-JP');
   $('f-gross').value = num(e['税込']).toLocaleString('ja-JP');

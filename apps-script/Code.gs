@@ -326,7 +326,8 @@ function doAppend(me, name, row, prefix) {
     }
     var r = appendRaw(name, row);
     logIt(me, '追加', name + ' ' + (row['id'] || row['値'] || ''), '', String(row['品名'] || row['項目'] || ''));
-    return { ok: true, row: r, id: row['id'] || '' };
+    var notified = name === '購入' ? notifyReview(row, String(row['状態'] || '')) : [];
+    return { ok: true, row: r, id: row['id'] || '', notified: notified };
   } finally {
     lock.releaseLock();
   }
@@ -381,14 +382,71 @@ function doUpdate(me, name, row, rowIndex, matchId) {
     var arr = head.map(function (h) { return row[h] !== undefined && row[h] !== null ? row[h] : ''; });
     sh.getRange(rowIndex, 1, 1, head.length).setValues([arr]);
     logIt(me, '更新', name + ' ' + (row['id'] || rowIndex), String(old['状態'] || ''), String(row['状態'] || ''));
-    return { ok: true };
+    // 状態が「チェック待ち」「社長待ち」に変わったときだけ知らせる（同じ状態のままの更新では送らない）
+    var notified = (name === '購入' && String(row['状態'] || '') !== String(old['状態'] || ''))
+      ? notifyReview(row, String(row['状態'] || '')) : [];
+    return { ok: true, notified: notified };
   } finally {
     lock.releaseLock();
   }
 }
 
 /* 誰が何を書けるか。画面ではなく、ここで決めます。 */
-var EVIDENCE_COLS = ['見積書', '発注書', '納品書', '請求書', '領収書', '振込証憑', 'その他', '証憑フォルダ', '更新日時', '更新者'];
+/* ==================== お知らせメール ====================
+   「チェックに出す」で、その記入をチェックする人にメールを送る（名波さん 2026-10-07）。
+   ・チェック待ちになったら → 担当の承認者（いなければ経理）
+   ・社長待ちになったら     → 社長
+   送り主はこの書き込み役を置いた人のアカウント。失敗しても記入は止めない。 */
+var APP_URL = 'https://choreia.github.io/Budget/';
+function peopleWithRole(role) {
+  return readRows('人').filter(function (u) { return u['ロール'] === role; })
+    .map(function (u) { return String(u['メール'] || '').toLowerCase(); }).filter(nonEmpty);
+}
+function reviewersFor(entry, state) {
+  if (state === '社長待ち') return peopleWithRole('pres');
+  var pd = personDepts(), to = [];
+  readRows('人').forEach(function (u) {
+    if (u['ロール'] !== 'mgr') return;
+    var who = { email: String(u['メール'] || '').toLowerCase(), depts: deptsOf(u['部門']) };
+    if (who.email && inCharge(who, entry, pd)) to.push(who.email);
+  });
+  if (!to.length) to = peopleWithRole('acc');           // 承認者のいない部署は経理が見る
+  var self = String(entry['記入者メール'] || '').toLowerCase();
+  return to.filter(function (e, i) { return e !== self && to.indexOf(e) === i; });
+}
+function notifyReview(entry, state) {
+  if (state !== 'チェック待ち' && state !== '社長待ち') return [];
+  try {
+    var to = reviewersFor(entry, state);
+    if (!to.length) return [];
+    var en = /\.in$/.test(ALLOWED_DOMAIN);
+    var amount = Number(String(entry['税込'] || 0).replace(/[^0-9.-]/g, '')) || 0;
+    var subject = en
+      ? '[Choreia Budget] Please review ' + entry['id'] + ' ' + (entry['品名'] || '')
+      : '[Choreia 予算] チェックをお願いします ' + entry['id'] + ' ' + (entry['品名'] || '');
+    var lines = en ? [
+      (entry['記入者'] || '') + ' submitted an entry for your review.', '',
+      'No.: ' + entry['id'], 'Item: ' + (entry['品名'] || ''), 'Amount (incl. tax): ' + amount.toLocaleString('en-IN'),
+      'Department: ' + (entry['部門'] || ''), 'Reason: ' + (entry['購入理由'] || ''), '',
+      'Open the app → Review: ' + APP_URL
+    ] : [
+      (entry['記入者'] || '') + ' さんから、チェック待ちの記入が届きました。' +
+        (state === '社長待ち' ? '（10万円以上のため、社長の確認待ちです）' : ''), '',
+      '番号：' + entry['id'], '品名：' + (entry['品名'] || ''), '金額（税込）：' + amount.toLocaleString('ja-JP') + ' 円',
+      '部門：' + (entry['部門'] || ''), '購入理由：' + (entry['購入理由'] || ''), '',
+      'アプリの「チェックする」から確認できます：' + APP_URL,
+      '', '※ このメールは Choreia 予算から自動で送っています。'
+    ];
+    MailApp.sendEmail({ to: to.join(','), subject: subject, body: lines.join('\n'), name: en ? 'Choreia Budget' : 'Choreia 予算' });
+    return to;
+  } catch (e) {
+    return [];
+  }
+}
+
+// 承認のあとでも本人が足してよい列。証憑と、届いてから分かる事実（インボイスNo・検収日）だけ。
+var EVIDENCE_COLS = ['見積書', '発注書', '納品書', '請求書', '領収書', '振込証憑', 'その他', '証憑フォルダ',
+                     'インボイスNo', '検収日', '更新日時', '更新者'];
 var OPEN_STATES = ['下書き', '差し戻し', 'チェック待ち'];
 function canWrite(me, name, row, old) {
   if (me.role === 'acc') return null;
