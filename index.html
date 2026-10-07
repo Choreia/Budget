@@ -438,9 +438,9 @@
               <div class="chips" id="ch-dept"></div>
             </div>
             <div class="field">
-              <label>項目</label>
+              <label>項目<span class="req">必須</span></label>
               <div class="chips" id="ch-item"></div>
-              <div class="hint">迷ったら選ばずに出せます。経理が入れます。</div>
+              <div class="hint">迷ったら「ほかを探す」から近いものを選んでください。違っていれば承認者が差し戻します。</div>
             </div>
             <div class="field" id="purposebox" hidden>
               <label>何のために使いますか<span class="req">必須</span></label>
@@ -463,7 +463,7 @@
             </div>
             <div class="row2">
               <div class="field">
-                <label for="f-pay">支払方法</label>
+                <label for="f-pay">支払方法<span class="req">必須</span></label>
                 <select id="f-pay"></select>
                 <div class="hint">立替を選ぶと、返金までこの1件で追いかけます。</div>
               </div>
@@ -750,7 +750,7 @@ var EN = {
   '金額（税込）':'Amount (Incl. Tax)','請求書や領収書に出ている金額です。':'Amount as shown on the invoice or receipt.',
   '金額（税抜）':'Amount (Excl. Tax)',
   '費用負担部門':'Cost-Bearing Department',
-  '項目（勘定科目）':'Account Item','迷ったら選ばずに出せます。経理が入れます。':'You can submit without selecting if you are unsure. Accounting will fill it in.',
+  '項目（勘定科目）':'Account Item','迷ったら「ほかを探す」から近いものを選んでください。違っていれば承認者が差し戻します。':'If unsure, pick the closest one under "Search others". The approver will send it back if it is wrong.',
   '購入先':'Vendor','店名・会社名':'Shop Name / Company Name',
   'インボイスNo':'Invoice No.','仕訳に要ります。請求書の登録番号です。立替なら空で構いません。':'Required for journal entries. This is the registration number on the invoice. Leave blank for employee reimbursements.',
   '支払方法':'Payment Method','立替を選ぶと、返金までこの1件で追いかけます。':'If you select "Employee Reimbursement," we will track this single case until the refund is complete.',
@@ -960,7 +960,7 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-10-07 v52';
+var BUILD = '2026-10-07 v53';
 var SCHEMA_VERSION = 4;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
@@ -1996,6 +1996,9 @@ async function submitEntry(asDraft){
   if(!why) err.push('購入理由');
   if(!gross) err.push('金額（税込）');
   if(!form.dept) err.push('費用負担部門');
+  // 項目と支払方法は記入する人が入れる。足りなければ承認者が差し戻す（名波さん 2026-10-07）
+  if(!form.item) err.push('項目');
+  if(!$('f-pay').value) err.push('支払方法');
   if(purposesFor(form.item).length && !form.purpose) err.push('何のために使うか');
   if(err.length && !asDraft){
     $('form-err').innerHTML = '<div class="err">'+esc(err.map(tx).join(isEn()?', ':'・'))+' '+tx('が空です。埋めてから出してください。')+'</div>';
@@ -2239,6 +2242,9 @@ function renderApprove(){
     var need = e['状態']===ST.PRES ? '<span class="pill p-bad">社長のチェック待ち</span>'
       : (num(e['税込'])>=presLimit() ? '<span class="pill p-warn">通すと社長へ回ります</span>' : '');
     var miss = evMissing(e);
+    var blank = [];
+    if(!e['項目']) blank.push(tx('項目'));
+    if(!e['支払方法']) blank.push(tx('支払方法'));
     return '<div class="card"><div class="body">'+
       '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:baseline">'+
         '<span class="mono" style="color:var(--muted)">'+esc(e.id)+'</span>'+
@@ -2251,7 +2257,11 @@ function renderApprove(){
       '<div style="color:var(--sub);font-size:.85rem;margin-top:4px">'+(isEn()?'Purpose: ':'理由：')+esc(e['購入理由'])+'</div>'+
       (miss.length ? '<div style="margin-top:8px"><span class="pill p-warn">'+esc(evNames(miss))+(isEn()?' still missing':'がまだ')+'</span></div>' : '')+
       (e['証憑フォルダ'] ? '<div class="filelist"><a href="'+esc(e['証憑フォルダ'])+'" target="_blank" rel="noopener">証憑フォルダを開く</a></div>' : '')+
-      '<div class="actions"><button class="btn" data-ok="'+e._row+'">チェック済にする</button>'+
+      (blank.length ? '<div style="margin-top:8px"><span class="pill p-bad">'+esc(blank.join(isEn()?', ':'・'))+
+        esc(T(' が空です。差し戻して、記入した人に入れてもらってください。',' is empty. Please send it back so the person can fill it in.'))+'</span></div>' : '')+
+      '<div class="actions">'+(blank.length
+        ? '<button class="btn" disabled title="'+esc(T('項目・支払方法が空のものは通せません','Cannot approve while the account item or payment method is empty'))+'">チェック済にする</button>'
+        : '<button class="btn" data-ok="'+e._row+'">チェック済にする</button>')+
       '<button class="btn ghost" data-rej="'+e._row+'">差し戻す</button></div>'+
       '</div></div>';
   }).join('') + '</div>';
@@ -2492,6 +2502,7 @@ function renderLedger(){
         '<td class="mono">'+md(e['支払日'])+'</td><td>'+statusPill(e)+
         (e['状態']===ST.OK ? ' <button class="btn ghost sm" data-payreq="'+e._row+'">支払依頼の文面</button>' : '')+
         (me.role==='acc' && e['状態']===ST.OK ? ' <button class="btn sm" data-pay="'+e._row+'">支払済に</button>' : '')+
+        (e['状態']===ST.OK && (me.role==='acc' || (me.role==='mgr' && inMyCharge(e))) ? ' <button class="btn ghost sm" data-rej="'+e._row+'">差し戻す</button>' : '')+
         (me.role==='acc' && e['状態']!==ST.PAID && e['状態']!==ST.WD ? ' <button class="btn ghost sm" data-wd="'+e._row+'">取り下げる</button>' : '')+
         '</td></tr>';
     }).join('')+'</tbody></table></div>'+
@@ -2784,8 +2795,8 @@ function findGaps(){
     }
     if(e['状態']===ST.OK || e['状態']===ST.PAID){
       var jm = journalMissing(e).filter(function(x){ return x!=='請求書か領収書'; });
-      // 項目・支払方法は経理と承認者が入れるもの（記入欄にも「迷ったら選ばずに出せます。経理が入れます」）。
-      // 本人の画面には、本人が埋められるもの（インボイスNo）だけ出す（浅田さん 2026-10-07）。
+      // 項目・支払方法が空のまま承認されたもの（必須にする前の分）は、承認者・経理が差し戻して本人に直してもらう。
+      // 本人の画面には、本人がその場で埋められるもの（インボイスNo）だけ出す。差し戻されれば「差し戻し」として出る。
       if(fillRole(e) !== 'all') jm = jm.filter(function(x){ return x==='インボイスNo'; });
       if(jm.length) out.push({kind:'仕訳', id:e.id, title:e['品名'], sub:sub,
         what:jm.join('・')+'がない',
@@ -2897,7 +2908,8 @@ function renderGaps(){
         return '<tr><td class="name"><span class="mono">'+esc(x.id)+'</span> '+esc(x.title)+'<small>'+esc(x.sub)+'</small></td>'+
           '<td><span class="pill p-bad">'+esc(x.what)+'</span><div class="hint" style="margin-top:4px">'+esc(x.why)+'</div></td>'+
           '<td>'+esc(x.who)+'</td><td class="mono">'+days(x.days)+'</td>'+
-          '<td>'+(x.sheet==='購入' && (x.kind==='仕訳' || x.kind==='日付') && canFill(x.row) ? '<button class="btn ghost sm" data-fill="'+x.row+'">'+esc(T('埋める','Fill in'))+'</button>'
+          '<td>'+(x.sheet==='購入' && x.kind==='仕訳' && canReturn(x.row) ? '<button class="btn ghost sm" data-rej="'+x.row+'">'+esc(T('差し戻す','Send back'))+'</button> ' : '')+
+                 (x.sheet==='購入' && (x.kind==='仕訳' || x.kind==='日付') && canFill(x.row) ? '<button class="btn ghost sm" data-fill="'+x.row+'">'+esc(T('埋める','Fill in'))+'</button>'
                  : x.sheet==='購入' && x.kind==='証憑' ? '<button class="btn ghost sm" data-ev="'+x.row+'">証憑を上げる</button>'
                  : x.sheet==='入金' && x.kind==='証憑' && canEditIncome(DB['入金'].filter(function(r){ return r._row===x.row; })[0]) ? '<button class="btn ghost sm" data-incev="'+x.row+'">請求書を上げる</button>' : '')+'</td></tr>';
       }).join('')+'</tbody></table></div>';
@@ -2932,6 +2944,12 @@ function fillRole(e){
   if(me.role==='mgr' && inMyCharge(e)) return 'all';
   if(String(e['記入者メール']||'').toLowerCase()===me.email.toLowerCase()) return 'facts';
   return '';
+}
+/* 承認済み（支払前）を差し戻せるか。経理と、その記入の担当の承認者。 */
+function canReturn(row){
+  var e = DB['購入'].filter(function(x){ return x._row===row; })[0];
+  if(!e || e['状態']!==ST.OK) return false;
+  return me.role==='acc' || (me.role==='mgr' && inMyCharge(e));
 }
 function canFill(row){ return !!fillRole(DB['購入'].filter(function(x){ return x._row===row; })[0]); }
 function fillModal(row){
