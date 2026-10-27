@@ -960,8 +960,10 @@ function applyLang(){
 }
 function toggleLang(){ try{ localStorage.setItem(LANG_KEY, isEn()?'ja':'en'); }catch(e){} applyLang(); if($('appmain') && !$('appmain').hidden){ try{ renderAll(); }catch(e){} } }
 
-var BUILD = '2026-10-07 v53';
+var BUILD = '2026-10-27 v54';
 var SCHEMA_VERSION = 4;
+/* 書き込み役（apps-script/Code.gs の GAS_VERSION）がこれより古ければ、管理者に貼り直しを促す。 */
+var GAS_WANT = 5;
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
            'インボイスNo','税抜','GST率','税込','TDS率','TDS額','支払額','HSNコード',
@@ -1466,18 +1468,9 @@ async function ensureDriveRoot(){
   localStorage.setItem('cb_drive_id', driveRoot);
 }
 async function boot(){
-  var readyKey = 'cb_ready_' + SCHEMA_VERSION + '_' + ssId;
+  var gasVer = '';
   try{
-    // 列が増えたときだけ走る。ふだんは丸ごと飛ばす。
-    if(localStorage.getItem(readyKey) !== '1'){
-      busy('はじめの準備をしています…');
-      try{ await prepare(); localStorage.setItem(readyKey, '1'); }
-      catch(e){
-        // 準備に失敗しても読み込みは続ける。ここで止めると画面が出ない。
-        setTimeout(function(){ toast('準備の一部ができませんでした：'+e.message, true); }, 1200);
-      }
-    }
-    // 書き込み役が別のシートを見ていないか、毎回確かめる
+    // 書き込み役が別のシートを見ていないか、毎回確かめる。準備より先に（違うシートに列を足さないように）
     if(viaGas()){
       busy('つなぎ先を確かめています…');
       var pong = await gas({action:'ping'});
@@ -1487,6 +1480,24 @@ async function boot(){
           (pong.spreadsheetName || pong.spreadsheetId || '不明')+'）。'+
           'このままだと違うシートに書いてしまうので、止めました。'+
           '設定タブで書き込み役をつなぎ直してください。');
+      }
+      gasVer = String(pong.version || 0);
+      // 古い書き込み役は振り分けや権限の判断が古いまま動く。気づけるのは管理者だけなので、管理者にだけ出す。
+      if((pong.version || 0) < GAS_WANT && (pong.role === 'acc' || isAdmin(me.email))){
+        setTimeout(function(){
+          toast('書き込み役が古い版です（v'+(pong.version || '?')+'、必要なのは v'+GAS_WANT+'）。'+
+            'apps-script/paste-ready.gs を貼り直し、「デプロイを管理」から新しいバージョンにしてください。', true);
+        }, 1500);
+      }
+    }
+    // 列が増えたときと、書き込み役が新しくなったときだけ走る。ふだんは丸ごと飛ばす。
+    var readyKey = 'cb_ready_' + SCHEMA_VERSION + '_' + gasVer + '_' + ssId;
+    if(localStorage.getItem(readyKey) !== '1'){
+      busy('はじめの準備をしています…');
+      try{ await prepare(); localStorage.setItem(readyKey, '1'); }
+      catch(e){
+        // 準備に失敗しても読み込みは続ける。ここで止めると画面が出ない。
+        setTimeout(function(){ toast('準備の一部ができませんでした：'+e.message, true); }, 1200);
       }
     }
     // まず小さいものだけ読んで画面を出す

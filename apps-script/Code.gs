@@ -28,6 +28,10 @@ var SPREADSHEET_ID = '';
 /* 設定ファイルを読めないときの保険。ここに書いた人は必ず管理者です。 */
 var FALLBACK_ADMINS = ['r.yasukouchi@m2-labo.jp'];
 
+/* この書き込み役の版。中身を変えたら1つ上げ、アプリの GAS_WANT も同じ数にします。
+   貼り直し忘れで古い版が動き続けると、アプリが管理者に知らせます（2026-10-27 承認者に記入が届かなかった件）。 */
+var GAS_VERSION = 5;
+
 var SHEETS = {
   '購入': ['id','記入日時','記入者メール','記入者','状態','種別','部門','発注日','項目','品名','購入理由','購入先',
            'インボイスNo','税抜','GST率','税込','TDS率','TDS額','支払額','HSNコード',
@@ -62,7 +66,7 @@ function doPost(e) {
 
     var me = lookupPerson(email);
     switch (req.action) {
-      case 'ping':   return json({ ok: true, email: email, role: me.role, depts: me.depts,
+      case 'ping':   return json({ ok: true, version: GAS_VERSION, email: email, role: me.role, depts: me.depts,
                                   spreadsheetId: book().getId(), spreadsheetName: book().getName() });
       case 'ensure': return json(doEnsure(me));
       case 'read':   return json(doRead(me, req.sheets));
